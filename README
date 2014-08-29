@@ -1,0 +1,56 @@
+General
+=======
+
+This was a 'quick' project to make a notifier script to email me (actual command is configurable) when certain interesting events happen with my
+deviantART account (currently comments, replies, unread notes and watched people's deviations posted), optionally with a whitelist to only bug me when
+certain people are involved, checking every 5 minutes by default.
+
+I don't have a need for further functionality, but as usual if there is enough demand, I can extend it. Please star this project if you use it so
+that I know which projects are most popular and therefore worth working on.
+
+The deviantAnywhere Firefox addon (https://addons.mozilla.org/en-US/firefox/addon/deviantanywhere/) was used as an example when developing the
+deviantART service code. 
+
+
+Requirements
+============
+
+Tested with (if you get it working on earlier versions please say, all available in Debian repos):
+
+Python v3.4
+Beautiful Soup v4.3.2: http://www.crummy.com/software/BeautifulSoup/
+Requests v2.3.0: http://python-requests.org
+python-YAML v3.11: http://pyyaml.org/
+
+
+Documentation
+=============
+
+This is a very simple script currently - it takes no arguments and runs in a loop, polling your deviantART account after a delay. To configure,
+create the '~/.config/deviantart-checker' directory and copy/rename example.conf to 'deviantart-checker.conf' inside, editing it as needed (see the
+comments in the file).
+
+If you follow the sendemail example, when someone replies to a comment you made, you'll get an email like the following:
+
+---------------------------------------------------------------------------
+
+Subject: [deviantart-checker] New Replies
+
+Message:
+
+New Replies:
+
+On <deviation title> by <artist>:
+
+<user> posted:
+blah blah blah blah
+
+---------------------------------------------------------------------------
+
+The output has also been tailored for other events and is similar.
+
+
+Contact Details
+===============
+
+OmegaPhil: OmegaPhil00@startmail.com
