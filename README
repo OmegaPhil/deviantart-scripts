@@ -2,8 +2,8 @@ General
 =======
 
 This was a 'quick' project to make a notifier script to email me (actual command is configurable) when certain interesting events happen with my
-deviantART account (currently comments, replies, unread notes and watched people's deviations posted), optionally with a whitelist to only bug me when
-certain people are involved, checking every 5 minutes by default.
+deviantART account (www.deviantart.com - currently comments, replies, unread notes and watched people's deviations posted), optionally with a whitelist
+to only bug me when certain people are involved for certain event types, checking every 5 minutes by default.
 
 I don't have a need for further functionality, but as usual if there is enough demand, I can extend it. Please star this project if you use it so
 that I know which projects are most popular and therefore worth working on.

@@ -636,6 +636,22 @@ def load_config():
             not config['update_every_minutes'] >= 5):
         config['update_every_minutes'] = 5
 
+    # Validating apply_whitelist_to
+    if ((not 'apply_whitelist_to' in config or
+         not config['apply_whitelist_to']
+        ) and
+        'notification_whitelist' in config and
+        config['notification_whitelist']):
+        print('config specifies notification_whitelist however '
+              'apply_whitelist_to is not present or empty - whitelist will not '
+              'be used', file=sys.stderr)
+    for event in config['apply_whitelist_to']:
+        if event not in ['comments', 'replies', 'unread_notes',
+                               'deviations']:
+            print('\'%s\' in \'apply_whitelist_to\' configuration is invalid -'
+                  ' please use \'comments\'/\'replies\'/\'unread_notes\''
+                  '/\'deviations\'' % event, file=sys.stderr)
+
 
 # Loading config
 try:
@@ -677,12 +693,23 @@ while True:
         new_deviations = dA.get_new(DEVIATIONS)
 
         # Setting default change reporting state based on whether there is a
-        # notification whitelist in use
-        if (not 'notification_whitelist' in config or
-                not config['notification_whitelist']):
-            notification_whitelist = False
-        else:
-            notification_whitelist = True
+        # notification whitelist in use, and then the particular events affected
+        notification_whitelist_comments = False
+        notification_whitelist_replies = False
+        notification_whitelist_unread_notes = False
+        notification_whitelist_deviations = False
+        if ('notification_whitelist' in config and
+                config['notification_whitelist'] and
+                'apply_whitelist_to' in config and
+                config['apply_whitelist_to']):
+            if 'comments' in config['apply_whitelist_to']:
+                notification_whitelist_comments = True
+            if 'replies' in config['apply_whitelist_to']:
+                notification_whitelist_replies = True
+            if 'unread_notes' in config['apply_whitelist_to']:
+                notification_whitelist_unread_notes = True
+            if 'deviations' in config['apply_whitelist_to']:
+                notification_whitelist_deviations = True
 
         # Summarise changes, and when a whitelist is in place, only returning
         # information if it includes something generated from a person of
@@ -690,7 +717,7 @@ while True:
         # Filter is used to remove empty items, list is used to explicitly
         # evaluate immediately
         comments_change_title, comments_change_summary, comments_users = dA.summarise_changes(new_comments, COMMENTS)  # pylint: disable=line-too-long
-        if ((notification_whitelist and not set(config['notification_whitelist']).intersection(comments_users)) or  # pylint: disable=line-too-long
+        if ((notification_whitelist_comments and not set(config['notification_whitelist']).intersection(comments_users)) or  # pylint: disable=line-too-long
                 not comments_change_title):
             comments = ''
         else:
@@ -698,7 +725,7 @@ while True:
                                     comments_change_summary)
 
         replies_change_title, replies_change_summary, replies_users = dA.summarise_changes(new_replies, REPLIES)  # pylint: disable=line-too-long
-        if ((notification_whitelist and not set(config['notification_whitelist']).intersection(replies_users)) or  # pylint: disable=line-too-long
+        if ((notification_whitelist_replies and not set(config['notification_whitelist']).intersection(replies_users)) or  # pylint: disable=line-too-long
                 not replies_change_title):
             replies = ''
         else:
@@ -706,7 +733,7 @@ while True:
                                    replies_change_summary)
 
         unread_notes_change_title, unread_notes_change_summary, unread_notes_users = dA.summarise_changes(new_unread_notes, UNREAD_NOTES)  # pylint: disable=line-too-long
-        if ((notification_whitelist and not set(config['notification_whitelist']).intersection(unread_notes_users)) or  # pylint: disable=line-too-long
+        if ((notification_whitelist_unread_notes and not set(config['notification_whitelist']).intersection(unread_notes_users)) or  # pylint: disable=line-too-long
                 not unread_notes_change_title):
             unread_notes = ''
         else:
@@ -714,7 +741,7 @@ while True:
                                         unread_notes_change_summary)
 
         deviations_change_title, deviations_change_summary, deviations_users = dA.summarise_changes(new_deviations, DEVIATIONS)  # pylint: disable=line-too-long
-        if ((notification_whitelist and not set(config['notification_whitelist']).intersection(deviations_users)) or  # pylint: disable=line-too-long
+        if ((notification_whitelist_deviations and not set(config['notification_whitelist']).intersection(deviations_users)) or  # pylint: disable=line-too-long
                 not deviations_change_title):
             deviations = ''
         else:
