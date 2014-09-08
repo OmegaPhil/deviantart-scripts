@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-Version 0.2 2014.08.29
+Version 0.3 2014.09.08
 Copyright (c) 2014, OmegaPhil - OmegaPhil00@startmail.com
 
 This program is free software: you can redistribute it and/or modify
@@ -255,30 +255,30 @@ class DeviantArtService(object):
         # Fetching and saving new message state. Note that replies are
         # basically comments so the class is reused
         self.comments = [Comment(int(hit['msgid']),
-                                 extract_text(hit['title']),
-                                 extract_text(hit['who']),
+                                 extract_text(hit['title'], True),
+                                 extract_text(hit['who'], True),
                                  int(hit['ts']), hit['url'],
                                  extract_text(hit['body']))
                          for hit in response['DiFi']['response']['calls'][COMMENTS]['response']['content'][0]['result']['hits']]  # pylint: disable=line-too-long
         self.comments_count = response['DiFi']['response']['calls'][COMMENTS]['response']['content'][0]['result']['count']  # pylint: disable=line-too-long
         self.replies = [Comment(int(hit['msgid']),
-                                extract_text(hit['title']),
-                                extract_text(hit['who']),
+                                extract_text(hit['title'], True),
+                                extract_text(hit['who'], True),
                                 int(hit['ts']), hit['url'],
                                 extract_text(hit['body']))
                         for hit in response['DiFi']['response']['calls'][REPLIES]['response']['content'][0]['result']['hits']]  # pylint: disable=line-too-long
         self.replies_count = response['DiFi']['response']['calls'][REPLIES]['response']['content'][0]['result']['count']  # pylint: disable=line-too-long
 
         self.unread_notes = [Note(int(hit['msgid']),
-                                  extract_text(hit['title']),
-                                  extract_text(hit['who']),
+                                  extract_text(hit['title'], True),
+                                  extract_text(hit['who'], True),
                                   int(hit['ts']))
                              for hit in response['DiFi']['response']['calls'][UNREAD_NOTES]['response']['content'][0]['result']['hits']]  # pylint: disable=line-too-long
         self.unread_notes_count = response['DiFi']['response']['calls'][UNREAD_NOTES]['response']['content'][0]['result']['count']  # pylint: disable=line-too-long
         self.deviations = [Deviation(hit['msgid'],
-                                     extract_text(hit['title']),
+                                     extract_text(hit['title'], True),
                                      int(hit['ts']), hit['url'],
-                                     extract_text(hit['username']))
+                                     extract_text(hit['username'], True))
                            for hit in response['DiFi']['response']['calls'][DEVIATIONS]['response']['content'][0]['result']['hits']]  # pylint: disable=line-too-long
         self.deviations_count = response['DiFi']['response']['calls'][DEVIATIONS]['response']['content'][0]['result']['count']  # pylint: disable=line-too-long
         self.__save_state()
@@ -592,11 +592,12 @@ def create_cache_directory():
                         % (cache_directory, e, traceback.format_exc()))
 
 
-def extract_text(html_text):
+def extract_text(html_text, collapse_lines=False):
 
     # Extract lines of text from HTML tags - this honours linebreaks. Strings
     # is a generator
-    return '\n'.join(bs4.BeautifulSoup(html_text).strings)
+    text = '\n'.join(bs4.BeautifulSoup(html_text).strings)
+    return text if not collapse_lines else text.replace('\n', ' ')
 
 
 def load_config():
@@ -636,6 +637,8 @@ def load_config():
             not config['update_every_minutes'] >= 5):
         config['update_every_minutes'] = 5
 
+    # Can't get the indentation to pylint's liking
+    # pylint: disable=bad-continuation
     # Validating apply_whitelist_to
     if ((not 'apply_whitelist_to' in config or
          not config['apply_whitelist_to']
@@ -646,8 +649,7 @@ def load_config():
               'apply_whitelist_to is not present or empty - whitelist will not '
               'be used', file=sys.stderr)
     for event in config['apply_whitelist_to']:
-        if event not in ['comments', 'replies', 'unread_notes',
-                               'deviations']:
+        if event not in ['comments', 'replies', 'unread_notes', 'deviations']:
             print('\'%s\' in \'apply_whitelist_to\' configuration is invalid -'
                   ' please use \'comments\'/\'replies\'/\'unread_notes\''
                   '/\'deviations\'' % event, file=sys.stderr)

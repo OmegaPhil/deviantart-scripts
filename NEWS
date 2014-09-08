@@ -1,0 +1,6 @@
+v0.3 (08.09.14):
+Allow for the whitelist to be selectively applied to certain events only - e.g. filter deviations but always be notified on replies.
+Improve text generation from initially HTML information associated with events. 
+
+v0.2 (30.08.14):
+Initial public release.
