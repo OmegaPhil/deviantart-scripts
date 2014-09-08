@@ -2,7 +2,7 @@
 
 '''
 Version 0.3 2014.09.08
-Copyright (c) 2014, OmegaPhil - OmegaPhil00@startmail.com
+Copyright (c) 2014, OmegaPhil - OmegaPhil@startmail.com
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by the
