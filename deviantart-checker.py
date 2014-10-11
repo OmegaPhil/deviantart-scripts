@@ -600,6 +600,22 @@ def extract_text(html_text, collapse_lines=False):
     return text if not collapse_lines else text.replace('\n', ' ')
 
 
+def generate_command_fragments(command, subject, message):
+
+    # Substituting values into command to call in the normal way for
+    # the subject since that is essentially fixed - content is not
+    # fixed and can contain quotes and speechmarks. I have tried to
+    # escape such stuff with shlex.quote, but it can't cope in
+    # examples of single quotes, and when a full command is quoted
+    # it doesn't execute correctly. Given that I don't want this going
+    # through a shell, I should be able to give command parameters
+    # straight to the called process without weird escaping - which is
+    # what I am doing here
+    command = command.replace('%s', '[deviantart-checker] ' + subject)
+    return [fragment.replace('%m', message) for fragment in
+            shlex.split(command)]
+
+
 def load_config():
 
     global config  # pylint: disable=global-statement
@@ -760,28 +776,19 @@ while True:
 
         if content:
 
-            # Substituting values into command to call in the normal way for
-            # the subject since that is essentially fixed - content is not
-            # fixed and can contain quotes and speechmarks. I have tried to
-            # escape such stuff with shlex.quote, but it can't cope in
-            # examples of single quotes, and when a full command is quoted
-            # it doesn't execute correctly. Given that I don't want this going
-            # through a shell, I should be able to give command parameters
-            # straight to the called process without wierd escaping - which is
-            # what I am doing here
-            command = config['command_to_run'].replace('%s', '[deviantart-checker] ' +  # pylint: disable=line-too-long
-                                                       ", ".join(title_bits))
-            command_fragments = [fragment.replace('%m', "\n\n".join(content))
-                                 for fragment in shlex.split(command)]
-
             try:
+                # pylint: disable=line-too-long
+                command_fragments = generate_command_fragments(config['command_to_run'],
+                                                               ", ".join(title_bits),
+                                                               "\n\n".join(content))
 
                 # Running command without a shell
                 subprocess.call(command_fragments)
 
             except Exception as e:  # pylint: disable=broad-except
                 raise Exception('Calling the command to run to notify changes '
-                                'failed:\n\n%s\n\n%s\n' % (command, e))
+                                'failed:\n\n%s\n\n%s\n' %
+                                (config['command_to_run'], e))
 
     except Exception as e:  # pylint: disable=broad-except
 
@@ -793,8 +800,24 @@ while True:
         # Examples of caught errors:
         # ConnectionError: HTTPSConnectionPool(host='www.deviantart.com', port=443): Max retries exceeded with url: /users/login (Caused by <class 'socket.error'>: [Errno 113] No route to host)
         # (<urllib3.connection.VerifiedHTTPSConnection object at 0x7f7f5f3a5e50>, 'Connection to www.deviantart.com timed out. (connect timeout=60)')
-        print('Unhandled error \'%s\'\n\n%s' % (e, traceback.format_exc()),
-              file=sys.stderr)
+        error_message = 'Unhandled error \'%s\'\n\n%s' % (e, traceback.format_exc())
+        print(error_message, file=sys.stderr)
+
+        # Running command_to_run_on_failure if specified
+        if config['command_to_run_on_failure']:
+
+            try:
+                command_fragments = generate_command_fragments(config['command_to_run_on_failure'],
+                                                               'Error', error_message)
+
+                # Running command without a shell
+                subprocess.call(command_fragments)
+
+            except Exception as e:  # pylint: disable=broad-except
+                print('Calling the command to run on failure failed:\n\n%s\n'
+                      '\n%s\n' % (config['command_to_run_on_failure'], e),
+                      file=sys.stderr)
+
 
     time.sleep(config['update_every_minutes'] * 60)
 
