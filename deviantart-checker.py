@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 '''
 
 import collections
+import fcntl
 import io
 import numbers
 import os
@@ -616,6 +617,35 @@ def generate_command_fragments(command, subject, message):
             shlex.split(command)]
 
 
+def handle_unknown_error(err):
+
+    # pylint: disable=line-too-long
+    # I have decided to just log failures rather than die - this is
+    # basically a service, and it is not acceptable for temporary
+    # failures to stop the program doing its job - it must simply retry
+    # after the usual delay
+    # Examples of caught errors:
+    # ConnectionError: HTTPSConnectionPool(host='www.deviantart.com', port=443): Max retries exceeded with url: /users/login (Caused by <class 'socket.error'>: [Errno 113] No route to host)
+    # (<urllib3.connection.VerifiedHTTPSConnection object at 0x7f7f5f3a5e50>, 'Connection to www.deviantart.com timed out. (connect timeout=60)')
+    error_message = 'Unhandled error \'%s\'\n\n%s' % (err, traceback.format_exc())
+    print(error_message, file=sys.stderr)
+
+    # Running command_to_run_on_failure if specified
+    if config['command_to_run_on_failure']:
+
+        try:
+            command_fragments = generate_command_fragments(config['command_to_run_on_failure'],
+                                                           'Error', error_message)
+
+            # Running command without a shell
+            subprocess.call(command_fragments)
+
+        except Exception as e:  # pylint: disable=broad-except
+            print('Calling the command to run on failure failed:\n\n%s\n'
+                  '\n%s\n' % (config['command_to_run_on_failure'], e),
+                  file=sys.stderr)
+
+
 def load_config():
 
     global config  # pylint: disable=global-statement
@@ -671,6 +701,129 @@ def load_config():
                   '/\'deviations\'' % event, file=sys.stderr)
 
 
+def poll_service():
+
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+
+    # Logging in to deviantART - any errors here will be fatal and are handled
+    # in the main scope
+    dA = DeviantArtService(config['username'], config['password'])
+
+    # Looping for regular message fetching
+    while True:
+
+        try:
+
+            # Attempting to log in - errors at this level will be logged and the
+            # program will simply wait until the next interval to try again
+            if not dA.logged_in:
+                dA.login()
+
+            try:
+
+                # Getting the current state of messages
+                dA.get_messages()
+
+            # Currently I'll treat all exceptions here as issues with
+            # deviantART or an expired login - invalidate the login and report
+            # on the issue but reraise waiting for the next loop run to react
+            except Exception as e:
+                dA.logged_in = False
+                raise Exception(e)
+
+            # Working out how the state has changed
+            new_comments = dA.get_new(COMMENTS)
+            new_replies = dA.get_new(REPLIES)
+            new_unread_notes = dA.get_new(UNREAD_NOTES)
+            new_deviations = dA.get_new(DEVIATIONS)
+
+            # Setting default change reporting state based on whether there is
+            # a notification whitelist in use, and then the particular events
+            # affected
+            notification_whitelist_comments = False
+            notification_whitelist_replies = False
+            notification_whitelist_unread_notes = False
+            notification_whitelist_deviations = False
+            if ('notification_whitelist' in config and
+                    config['notification_whitelist'] and
+                    'apply_whitelist_to' in config and
+                    config['apply_whitelist_to']):
+                if 'comments' in config['apply_whitelist_to']:
+                    notification_whitelist_comments = True
+                if 'replies' in config['apply_whitelist_to']:
+                    notification_whitelist_replies = True
+                if 'unread_notes' in config['apply_whitelist_to']:
+                    notification_whitelist_unread_notes = True
+                if 'deviations' in config['apply_whitelist_to']:
+                    notification_whitelist_deviations = True
+
+            # Summarise changes, and when a whitelist is in place, only
+            # returning information if it includes something generated from a
+            # person of interest
+            # Filter is used to remove empty items, list is used to explicitly
+            # evaluate immediately
+            comments_change_title, comments_change_summary, comments_users = dA.summarise_changes(new_comments, COMMENTS)  # pylint: disable=line-too-long
+            if ((notification_whitelist_comments and not set(config['notification_whitelist']).intersection(comments_users)) or  # pylint: disable=line-too-long
+                    not comments_change_title):
+                comments = ''
+            else:
+                comments = '%s:\n%s' % (comments_change_title,
+                                        comments_change_summary)
+
+            replies_change_title, replies_change_summary, replies_users = dA.summarise_changes(new_replies, REPLIES)  # pylint: disable=line-too-long
+            if ((notification_whitelist_replies and not set(config['notification_whitelist']).intersection(replies_users)) or  # pylint: disable=line-too-long
+                    not replies_change_title):
+                replies = ''
+            else:
+                replies = '%s:\n%s' % (replies_change_title,
+                                       replies_change_summary)
+
+            unread_notes_change_title, unread_notes_change_summary, unread_notes_users = dA.summarise_changes(new_unread_notes, UNREAD_NOTES)  # pylint: disable=line-too-long
+            if ((notification_whitelist_unread_notes and not set(config['notification_whitelist']).intersection(unread_notes_users)) or  # pylint: disable=line-too-long
+                    not unread_notes_change_title):
+                unread_notes = ''
+            else:
+                unread_notes = '%s:\n%s' % (unread_notes_change_title,
+                                            unread_notes_change_summary)
+
+            deviations_change_title, deviations_change_summary, deviations_users = dA.summarise_changes(new_deviations, DEVIATIONS)  # pylint: disable=line-too-long
+            if ((notification_whitelist_deviations and not set(config['notification_whitelist']).intersection(deviations_users)) or  # pylint: disable=line-too-long
+                    not deviations_change_title):
+                deviations = ''
+            else:
+                deviations = '%s:\n%s' % (deviations_change_title,
+                                          deviations_change_summary)
+
+            # pylint: disable=bad-builtin
+            title_bits = list(filter(None, [deviations_change_title,
+                                            unread_notes_change_title,
+                                            replies_change_title,
+                                            comments_change_title]))
+            content = list(filter(None, [deviations, unread_notes, replies,
+                                         comments]))
+
+            if content:
+
+                try:
+                    # pylint: disable=line-too-long
+                    command_fragments = generate_command_fragments(config['command_to_run'],
+                                                                   ", ".join(title_bits),
+                                                                   "\n\n".join(content))
+
+                    # Running command without a shell
+                    subprocess.call(command_fragments)
+
+                except Exception as e:  # pylint: disable=broad-except
+                    raise Exception('Calling the command to run to notify changes '
+                                    'failed:\n\n%s\n\n%s\n' %
+                                    (config['command_to_run'], e))
+
+        except Exception as e:  # pylint: disable=broad-except
+            handle_unknown_error(e)
+
+        time.sleep(config['update_every_minutes'] * 60)
+
+
 # Loading config
 try:
     load_config()
@@ -679,145 +832,25 @@ except Exception as e:  # pylint: disable=broad-except
           file=sys.stderr)
     sys.exit(1)
 
-# Logging in to deviantART
-dA = DeviantArtService(config['username'], config['password'])
-
-# Looping for regular message fetching
-while True:
-
+with open(__file__) as f:
     try:
 
-        # Attempting to log in - errors at this level will be logged and the
-        # program will simply wait until the next interval to try again
-        if not dA.logged_in:
-            dA.login()
+        # Only allow one instance at a time - exclusive lock on the script
+        # itself rather than using a pidfile
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
-        try:
+        # Start polling loop
+        poll_service()
 
-            # Getting the current state of messages
-            dA.get_messages()
-
-        # Currently I'll treat all exceptions here as issues with deviantART or
-        # an expired login - invalidate the login and report on the issue but
-        # reraise waiting for the next loop run to react
-        except Exception as e:
-            dA.logged_in = False
-            raise Exception(e)
-
-        # Working out how the state has changed
-        new_comments = dA.get_new(COMMENTS)
-        new_replies = dA.get_new(REPLIES)
-        new_unread_notes = dA.get_new(UNREAD_NOTES)
-        new_deviations = dA.get_new(DEVIATIONS)
-
-        # Setting default change reporting state based on whether there is a
-        # notification whitelist in use, and then the particular events affected
-        notification_whitelist_comments = False
-        notification_whitelist_replies = False
-        notification_whitelist_unread_notes = False
-        notification_whitelist_deviations = False
-        if ('notification_whitelist' in config and
-                config['notification_whitelist'] and
-                'apply_whitelist_to' in config and
-                config['apply_whitelist_to']):
-            if 'comments' in config['apply_whitelist_to']:
-                notification_whitelist_comments = True
-            if 'replies' in config['apply_whitelist_to']:
-                notification_whitelist_replies = True
-            if 'unread_notes' in config['apply_whitelist_to']:
-                notification_whitelist_unread_notes = True
-            if 'deviations' in config['apply_whitelist_to']:
-                notification_whitelist_deviations = True
-
-        # Summarise changes, and when a whitelist is in place, only returning
-        # information if it includes something generated from a person of
-        # interest
-        # Filter is used to remove empty items, list is used to explicitly
-        # evaluate immediately
-        comments_change_title, comments_change_summary, comments_users = dA.summarise_changes(new_comments, COMMENTS)  # pylint: disable=line-too-long
-        if ((notification_whitelist_comments and not set(config['notification_whitelist']).intersection(comments_users)) or  # pylint: disable=line-too-long
-                not comments_change_title):
-            comments = ''
-        else:
-            comments = '%s:\n%s' % (comments_change_title,
-                                    comments_change_summary)
-
-        replies_change_title, replies_change_summary, replies_users = dA.summarise_changes(new_replies, REPLIES)  # pylint: disable=line-too-long
-        if ((notification_whitelist_replies and not set(config['notification_whitelist']).intersection(replies_users)) or  # pylint: disable=line-too-long
-                not replies_change_title):
-            replies = ''
-        else:
-            replies = '%s:\n%s' % (replies_change_title,
-                                   replies_change_summary)
-
-        unread_notes_change_title, unread_notes_change_summary, unread_notes_users = dA.summarise_changes(new_unread_notes, UNREAD_NOTES)  # pylint: disable=line-too-long
-        if ((notification_whitelist_unread_notes and not set(config['notification_whitelist']).intersection(unread_notes_users)) or  # pylint: disable=line-too-long
-                not unread_notes_change_title):
-            unread_notes = ''
-        else:
-            unread_notes = '%s:\n%s' % (unread_notes_change_title,
-                                        unread_notes_change_summary)
-
-        deviations_change_title, deviations_change_summary, deviations_users = dA.summarise_changes(new_deviations, DEVIATIONS)  # pylint: disable=line-too-long
-        if ((notification_whitelist_deviations and not set(config['notification_whitelist']).intersection(deviations_users)) or  # pylint: disable=line-too-long
-                not deviations_change_title):
-            deviations = ''
-        else:
-            deviations = '%s:\n%s' % (deviations_change_title,
-                                      deviations_change_summary)
-
-        # pylint: disable=bad-builtin
-        title_bits = list(filter(None, [deviations_change_title,
-                                        unread_notes_change_title,
-                                        replies_change_title,
-                                        comments_change_title]))
-        content = list(filter(None, [deviations, unread_notes, replies,
-                                     comments]))
-
-        if content:
-
-            try:
-                # pylint: disable=line-too-long
-                command_fragments = generate_command_fragments(config['command_to_run'],
-                                                               ", ".join(title_bits),
-                                                               "\n\n".join(content))
-
-                # Running command without a shell
-                subprocess.call(command_fragments)
-
-            except Exception as e:  # pylint: disable=broad-except
-                raise Exception('Calling the command to run to notify changes '
-                                'failed:\n\n%s\n\n%s\n' %
-                                (config['command_to_run'], e))
+    except IOError as e:
+        print('This script appears to already be running - please kill all '
+              'other instances before running again', file=sys.stderr)
+        sys.exit(1)
 
     except Exception as e:  # pylint: disable=broad-except
+        handle_unknown_error(e)
 
-        # pylint: disable=line-too-long
-        # I have decided to just log failures rather than die - this is
-        # basically a service, and it is not acceptable for temporary
-        # failures to stop the program doing its job - it must simply retry
-        # after the usual delay
-        # Examples of caught errors:
-        # ConnectionError: HTTPSConnectionPool(host='www.deviantart.com', port=443): Max retries exceeded with url: /users/login (Caused by <class 'socket.error'>: [Errno 113] No route to host)
-        # (<urllib3.connection.VerifiedHTTPSConnection object at 0x7f7f5f3a5e50>, 'Connection to www.deviantart.com timed out. (connect timeout=60)')
-        error_message = 'Unhandled error \'%s\'\n\n%s' % (e, traceback.format_exc())
-        print(error_message, file=sys.stderr)
+    finally:
 
-        # Running command_to_run_on_failure if specified
-        if config['command_to_run_on_failure']:
-
-            try:
-                command_fragments = generate_command_fragments(config['command_to_run_on_failure'],
-                                                               'Error', error_message)
-
-                # Running command without a shell
-                subprocess.call(command_fragments)
-
-            except Exception as e:  # pylint: disable=broad-except
-                print('Calling the command to run on failure failed:\n\n%s\n'
-                      '\n%s\n' % (config['command_to_run_on_failure'], e),
-                      file=sys.stderr)
-
-
-    time.sleep(config['update_every_minutes'] * 60)
-
+        # Release lock
+        fcntl.flock(f, fcntl.LOCK_UN | fcntl.LOCK_NB)
