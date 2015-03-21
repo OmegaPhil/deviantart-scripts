@@ -1,3 +1,6 @@
+v0.5 (21.03.15):
+Only allow one instance of the script to run at once.
+
 v0.4 (11.10.14):
 command_to_run_on_failure in the config now allows you to run a configurable command when an unhandled error happens. The script continues to run under
 these circumstances, but now you don't have to wrap around stderr somehow to get told when it happens.

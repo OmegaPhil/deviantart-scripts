@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 '''
-Version 0.4 2014.10.11
-Copyright (c) 2014, OmegaPhil - OmegaPhil@startmail.com
+Version 0.5 2015.03.21
+Copyright (c) 2014-2015, OmegaPhil - OmegaPhil@startmail.com
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by the
@@ -36,7 +36,7 @@ import yaml
 
 
 GPL_NOTICE = '''
-Copyright (C) 2014 OmegaPhil
+Copyright (C) 2014-2015 OmegaPhil
 License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.
