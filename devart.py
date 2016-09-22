@@ -220,9 +220,11 @@ class DeviantArtService(object):
                             ' etc:\n\n%s\n\n%s\n' % (e,
                                                      traceback.format_exc()))
 
-        # Making sure difi response and all contained calls are valid
+        # Making sure difi response and all contained calls are valid - remember
+        # that the range is generating 0-3 and stopping at 4 (so it is correctly
+        # generating a 4-call range)
         response = self.__r.json()
-        if not validate_difi_response(response, range(5)):
+        if not validate_difi_response(response, range(4)):
             raise Exception('The DiFi page request to get number of unread '
                             'notes, deviations etc succeeded but the DiFi '
                             'request failed:\n\n%s\n' % response)
