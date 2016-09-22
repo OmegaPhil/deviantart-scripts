@@ -29,14 +29,13 @@ import traceback
 import shlex
 import sys
 
-import bs4  # Beautiful Soup 4
 import yaml
 
 import devart
 
 
 GPL_NOTICE = '''
-Copyright (C) 2014-2015 OmegaPhil
+Copyright (C) 2014-2016 OmegaPhil
 License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.
@@ -115,17 +114,17 @@ def load_config():
                                traceback.format_exc()))
 
     # Ensuring required settings exist
-    if not 'username' in config or not 'password' in config:
+    if 'username' not in config or 'password' not in config:
         raise Exception('Please ensure a deviantART username and password is '
                         'configured in \'%s\'' % config_file_path)
-    if not 'command_to_run' in config:
+    if 'command_to_run' not in config:
         raise Exception('Please ensure command_to_run is configured in \'%s\'' %
                         config_file_path)
 
     # Ensuring sensible defaults
     # Keep update delay at at least 5 minutes so as not to cause deviantART
     # unnecessary load
-    if (not 'update_every_minutes' in config or
+    if ('update_every_minutes' not in config or
             not isinstance(config['update_every_minutes'], numbers.Number) or
             not config['update_every_minutes'] >= 5):
         config['update_every_minutes'] = 5
@@ -133,7 +132,7 @@ def load_config():
     # Can't get the indentation to pylint's liking
     # pylint: disable=bad-continuation
     # Validating apply_whitelist_to
-    if ((not 'apply_whitelist_to' in config or
+    if (('apply_whitelist_to' not in config or
          not config['apply_whitelist_to']
         ) and
         'notification_whitelist' in config and
@@ -180,10 +179,10 @@ def poll_service():
                 raise
 
             # Working out how the state has changed
-            new_comments = dA.get_new(state, devart.COMMENTS)
-            new_replies = dA.get_new(state, devart.REPLIES)
-            new_unread_notes = dA.get_new(state, devart.UNREAD_NOTES)
-            new_deviations = dA.get_new(state, devart.DEVIATIONS)
+            new_comments = devart.get_new(state, devart.COMMENTS)
+            new_replies = devart.get_new(state, devart.REPLIES)
+            new_unread_notes = devart.get_new(state, devart.UNREAD_NOTES)
+            new_deviations = devart.get_new(state, devart.DEVIATIONS)
 
             # Setting default change reporting state based on whether there is
             # a notification whitelist in use, and then the particular events

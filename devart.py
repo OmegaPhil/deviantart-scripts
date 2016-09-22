@@ -16,9 +16,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 '''
 
 import collections
+import datetime
 import io
 import os.path
 import traceback
+import urllib.parse
 
 import bs4  # Beautiful Soup 4
 import requests
@@ -35,6 +37,7 @@ DEVIATIONS = 3
 class AccountState(object):
     '''Maintains the current state of the deviantART account'''
 
+    # pylint: disable=too-many-instance-attributes,too-few-public-methods
 
     def __init__(self, state_file_path):
         self.state_file_path = os.path.expanduser(state_file_path)
@@ -52,12 +55,12 @@ class AccountState(object):
 
     def __create_cache_directory(self):
         try:
-    
+
             # Making sure cache directory exists
             cache_directory = os.path.dirname(self.state_file_path)
             if not os.path.exists(cache_directory):
                 os.mkdir(cache_directory)
-    
+
         except Exception as e:
             raise Exception('Unable to create this program\'s cache '
                             'directory (\'%s\'):\n\n%s\n\n%s\n'
@@ -111,6 +114,7 @@ class AccountState(object):
 
 
     def save_state(self):
+        '''Save internal state to the configured state file'''
 
         # Making sure cache directory is present
         self.__create_cache_directory()
@@ -164,7 +168,7 @@ class DeviantArtService(object):
 
         # Making sure difi response is valid
         response = self.__r.json()
-        if not self.__validate_difi_response(response, 0):
+        if not validate_difi_response(response, 0):
             raise Exception('The DiFi page request for the inbox folder ID '
                             'succeeded but the DiFi request failed:\n\n%s\n'
                             % response)
@@ -181,26 +185,8 @@ class DeviantArtService(object):
                             'folders:\n\n%s\n' % response)
 
 
-    def __validate_difi_response(self, response, call_numbers):
-
-        # Making sure call_numbers is iterable - e.g. just one call number was
-        # passed
-        if not isinstance(call_numbers, collections.Sequence):
-            call_numbers = [call_numbers]
-
-        # Failing if overall call failed
-        if response['DiFi']['status'] != 'SUCCESS':
-            return False
-
-        # Failing if any one call failed
-        for call_number in call_numbers:
-            if response['DiFi']['response']['calls'][call_number]['response']['status'] != 'SUCCESS':  # pylint: disable=line-too-long
-                return False
-
-        return True
-
-
     def get_messages(self, state):
+        '''Fetch new messages from deviantART'''
 
         # Ensure I am logged in first
         if not self.logged_in:
@@ -236,7 +222,7 @@ class DeviantArtService(object):
 
         # Making sure difi response and all contained calls are valid
         response = self.__r.json()
-        if not self.__validate_difi_response(response, range(4)):
+        if not validate_difi_response(response, range(5)):
             raise Exception('The DiFi page request to get number of unread '
                             'notes, deviations etc succeeded but the DiFi '
                             'request failed:\n\n%s\n' % response)
@@ -310,29 +296,357 @@ class DeviantArtService(object):
 #         return (messagesCount, notesCount)
 
 
-    def get_new(self, state, messages_type):
+    def get_note_folders(self):
+        '''Obtain list of note folders from deviantART'''
 
-        # Dealing with different message types requested
-        if messages_type == COMMENTS:
-            return set(state.comments) - set(state.old_comments)
-        elif messages_type == REPLIES:
-            return set(state.replies) - set(state.old_replies)
-        elif messages_type == UNREAD_NOTES:
-            return set(state.unread_notes) - set(state.old_unread_notes)
-        elif messages_type == DEVIATIONS:
-            return set(state.deviations) - set(state.old_deviations)
-        else:
+        # DiFi doesn't appear to provide a way to get a list of folders, so just
+        # fetching and parsing the notes page
+        try:
+            notifications_url = 'http://www.deviantart.com/notifications/notes'
+            self.__r = self.__s.get(notifications_url, timeout=60)
+            self.__r.raise_for_status()
 
-            # Invalid messages_type passed
-            raise Exception('get_new was called with an invalid messages_type'
-                            ' (%s)' % messages_type)
+        except Exception as e:
+            raise Exception('Unable to load deviantART notes page:\n\n%s\n\n%s'
+                            '\n' % (e, traceback.format_exc()))
+
+        # Parsing page
+        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+
+        # Determining list of note folders
+        note_folders = []
+        for folder_link in self.__last_content.select('a.folder-link'):
+
+            # Validating link data
+            if 'data-folderid' not in folder_link.attrs:
+                raise Exception('Unable to obtain the folder ID from link tag '
+                                '\'%s\' - failed to generate a list of notes '
+                                'folders in the get_notes_folders call!'
+                                % folder_link)
+            if 'title' not in folder_link.attrs:
+                raise Exception('Unable to obtain the folder title from link tag'
+                                '\'%s\' - failed to generate a list of notes '
+                                'folders in the get_notes_folders call!'
+                                % folder_link)
+
+            # 'rel' is actually the count of contained notes, used as a
+            # sanity check . Note that even though there is only one rel attribute,
+            # Beautiful Soup returns a list?? Also need to remove thousands
+            # separator etc
+            if 'rel' not in folder_link.attrs:
+                raise Exception('Unable to obtain the folder notes count from '
+                                'link tag \'%s\' - failed to generate a list of '
+                                'notes folders in the get_notes_folders call!'
+                                % folder_link)
+            notes_count = int(folder_link.attrs['rel'][0].replace(',', ''))
+
+            note_folder = NoteFolder(folder_link.attrs['data-folderid'],
+                                           folder_link.attrs['title'])
+            note_folder.site_note_count = notes_count
+            note_folders.append(note_folder)
+
+        return note_folders
+
+
+    def get_note_in_folder(self, folder_ID, note_ID):
+        '''Fetch a note from a folder'''
+
+        # pylint: disable=too-many-branches,too-many-locals
+
+        # Dealing with special folder_IDs - remember not to update the folder_ID
+        # variable so that you don't permanently corrupt it
+        prepared_folder_ID = format_note_folder_id(folder_ID)
+
+        try:
+
+            # The 'ui' field in the form is actually the 'userinfo' cookie -
+            # its not directly usable via the cookie value, have to urldecode.
+            # This is on top of having the correct login cookies...
+            data = {'c[]': ['"Notes","display_note",[%s,%s]'
+                           % (prepared_folder_ID, note_ID)],
+                     'ui': urllib.parse.unquote(self.__s.cookies['userinfo']),
+                     't': 'json'}
+            self.__r = self.__s.post(self.__difi_url, data=data, timeout=60)
+            self.__r.raise_for_status()
+
+        except Exception as e:
+            raise Exception('Unable to fetch note ID \'%s\' from folder ID '
+                            '\'%s\':\n\n%s\n\n%s\n'
+                            % (note_ID, folder_ID, e,
+                               traceback.format_exc()))
+
+        # Making sure difi response and all contained calls are valid
+        response = self.__r.json()
+        if not validate_difi_response(response, range(1)):
+            raise Exception('The DiFi page request to fetch note ID \'%s\' from'
+                            ' folder ID \'%s\' succeeded but the DiFi request '
+                            'failed:\n\n%s\n'
+                            % (note_ID, folder_ID, response))
+
+        # Actual note data is returned in HTML
+        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'])  # pylint: disable=line-too-long
+
+        # Fetching note title and validating
+        note_span = html_data.select_one('span.mcb-title')
+        if not note_span:
+            raise Exception('Unable to obtain note title from the following note'
+                            ' HTML:\n\n%s\n\nProblem occurred while fetching '
+                            'note ID \'%s\' from folder ID \'%s\''
+                            % (html_data.text, note_ID, folder_ID))
+        note_title = note_span.text
+
+        # Fetching sender details and validating
+        sender_span = html_data.select_one('span.mcb-from')
+        if not sender_span:
+            raise Exception('Unable to obtain note sender from the following '
+                            'note HTML:\n\n%s\n\nProblem occurred while fetching'
+                            ' note ID \'%s\' from folder ID \'%s\''
+                            % (html_data.text, note_ID, folder_ID))
+        if 'username' not in sender_span.attrs:
+            raise Exception('Unable to obtain note sender username from the '
+                            'following note HTML:\n\n%s\n\nProblem occurred '
+                            'while fetching note ID \'%s\' from folder ID \'%s\''
+                            % (html_data.text, note_ID, folder_ID))
+        note_sender = sender_span.attrs['username']
+
+        # Fetching timestamp and validating
+        timestamp_span = html_data.select_one('span.mcb-ts')
+        if not timestamp_span:
+            raise Exception('Unable to obtain timestamp span from the '
+                            'following note HTML:\n\n%s\n\nProblem occurred'
+                            ' while fetching note ID \'%s\' from folder ID \'%s\''
+                            % (html_data.text, note_ID, folder_ID))
+        if 'title' not in timestamp_span.attrs:
+            raise Exception('Unable to obtain timestamp \'title\' from the '
+                            'timestamp span from the following note HTML:'
+                            '\n\n%s\n\nProblem occurred while fetching note ID '
+                            '\'%s\' from folder ID \'%s\''
+                            % (html_data.text, note_ID, folder_ID))
+        note_timestamp = timestamp_span.attrs['title']
+
+        # If the timestamp includes 'ago', its not the proper timestamp - after
+        # notes get ~1 week old, deviantART switches the proper timestamp into
+        # the tag text rather than the title attribute
+        if 'ago' in note_timestamp:
+            note_timestamp = timestamp_span.text
+
+        try:
+
+            # Converting the deviantART datetime string into a proper UNIX
+            # timestamp
+            # Example: 'Jun 9, 2014, 11:08:28 PM'
+            note_timestamp = datetime.datetime.strptime(note_timestamp,
+                                                '%b %d, %Y, %I:%M:%S %p')
+            note_timestamp = note_timestamp.timestamp()
+
+        except ValueError as e:
+            raise Exception('Unable to parse timestamp \'%s\' from note ID '
+                            '\'%s\' while fetching note from folder ID \'%s\':'
+                            '\n\n%s\n\n%s\n'
+                            % (note_timestamp, note_ID, folder_ID, e,
+                               traceback.format_exc()))
+
+        # Fetching note HTML and validating
+        div_wraptext = html_data.select_one('.mcb-body.wrap-text')
+        if not div_wraptext:
+            raise Exception('Unable to parse note text from the following note '
+                            'HTML:\n\n%s\n\nProblem occurred while '
+                            'fetching note ID \'%s\' from from folder ID \'%s\''
+                            % (html_data, note_ID, folder_ID))
+
+        # Turn links in the div to text links without the deviantART redirector
+        for link_tag in div_wraptext.select('a'):
+            if 'http://' in link_tag.attrs['href']:
+                link_tag.string = link_tag.attrs['href'].replace(
+                            'http://www.deviantart.com/users/outgoing?', '')
+            else:
+                link_tag.string = link_tag.attrs['href'].replace(
+                            'https://www.deviantart.com/users/outgoing?', '')
+            link_tag.unwrap()
+
+        # Replace out linebreaks with newlines to ensure they get honoured
+        for linebreak in div_wraptext.select('br'):
+            linebreak.replace_with('\n')
+
+        # TODO: In the future I should textify things like smilies etc
+        note_text = div_wraptext.text.strip()
+
+        # Finally instantiating the note
+        note = Note(note_ID, note_title, note_sender, note_timestamp)
+        note.text = note_text
+        note.folder_ID = folder_ID
+
+        return note
+
+
+    def get_note_ids_in_folder(self, folder_ID):
+        '''Fetch all note IDs in a set from specified folder (one DiFi call per
+        25 notes) - used to audit note IDs stored in the database'''
+
+        # Dealing with special folder_IDs
+        folder_ID = format_note_folder_id(folder_ID)
+
+        note_ids = set()
+        offset = 0
+        while True:
+
+            notes_detected = False
+
+            try:
+
+                # The 'ui' field in the form is actually the 'userinfo' cookie -
+                # its not directly usable via the cookie value, have to urldecode.
+                # This is on top of having the correct login cookies...
+                data = {'c[]': ['"Notes","display_folder",[%s,%s,0]'
+                               % (folder_ID, offset)],
+                         'ui': urllib.parse.unquote(self.__s.cookies['userinfo']),
+                         't': 'json'}
+                self.__r = self.__s.post(self.__difi_url, data=data, timeout=60)
+                self.__r.raise_for_status()
+
+            except Exception as e:
+                raise Exception('Unable to fetch note IDs from offset \'%s\' '
+                                'from folder ID \'%s\':\n\n%s\n\n%s\n'
+                                % (offset, folder_ID, e,
+                                   traceback.format_exc()))
+
+            # Making sure difi response and all contained calls are valid
+            response = self.__r.json()
+            if not validate_difi_response(response, range(1)):
+                raise Exception('The DiFi page request to fetch note IDs from '
+                                'offset \'%s\' from folder ID \'%s\' succeeded '
+                                'but the DiFi request failed:\n\n%s\n'
+                                % (offset, folder_ID, response))
+
+            # Actual note data is returned in HTML
+            html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'])  # pylint: disable=line-too-long
+
+            for listitem_tag in html_data.select('li.note'):
+
+                notes_detected = True
+
+                # Fetching note details and validating
+                note_details = listitem_tag.select_one('.note-details')
+                if not note_details:
+                    raise Exception('Unable to parse note details from the '
+                                    'following note HTML:\n\n%s\n\nProblem '
+                                    'occurred while fetching note IDs from '
+                                    'offset \'%s\' from folder ID \'%s\''
+                                    % (listitem_tag, offset, folder_ID))
+
+                # Fetching note ID and validating
+                note_details_link = note_details.select_one('span > a')
+                if not note_details_link:
+                    raise Exception('Unable to parse note details link from the '
+                                    ' following note HTML:\n\n%s\n\nProblem '
+                                    'occurred while fetching note IDs from '
+                                    'offset \'%s\' from folder ID \'%s\''
+                                    % (listitem_tag, offset, folder_ID))
+                if 'data-noteid' not in note_details_link.attrs:
+                    raise Exception('Unable to obtain note ID from note details '
+                                    'link from the following note HTML:\n\n%s'
+                                    '\n\nProblem occurred while fetching notes '
+                                    'from offset \'%s\' from folder ID \'%s\''
+                                    % (listitem_tag, offset, folder_ID))
+
+                # Collecting obtained note_ID - note that these IDs are supposed
+                # to be ints, affects set comparisons etc (int !=str)
+                note_ids.add(int(note_details_link.attrs['data-noteid']))
+
+            # Breaking if no notes were returned
+            if not notes_detected:
+                break
+
+            # Looping - notes are available in 25-note pages
+            offset += 25
+
+        return note_ids
+
+
+    def get_notes_in_folder(self, folder_ID, note_offset):
+        '''Fetch desired notes from specified folder, with the offset allowing
+        you to page through the folder (max 25 notes are returned by
+        deviantART), note data is fetched in separate DiFi calls'''
+
+        # Dealing with special folder_IDs - remember not to update the folder_ID
+        # variable so that you don't permanently corrupt it
+        prepared_folder_ID = format_note_folder_id(folder_ID)
+
+        try:
+
+            # The 'ui' field in the form is actually the 'userinfo' cookie -
+            # its not directly usable via the cookie value, have to urldecode.
+            # This is on top of having the correct login cookies...
+            data = {'c[]': ['"Notes","display_folder",[%s,%s,0]'
+                           % (prepared_folder_ID, note_offset)],
+                     'ui': urllib.parse.unquote(self.__s.cookies['userinfo']),
+                     't': 'json'}
+            self.__r = self.__s.post(self.__difi_url, data=data, timeout=60)
+            self.__r.raise_for_status()
+
+        except Exception as e:
+            raise Exception('Unable to fetch notes from offset \'%s\' from '
+                            'folder ID \'%s\':\n\n%s\n\n%s\n'
+                            % (note_offset, folder_ID, e,
+                               traceback.format_exc()))
+
+        # Making sure difi response and all contained calls are valid
+        response = self.__r.json()
+        if not validate_difi_response(response, range(1)):
+            raise Exception('The DiFi page request to fetch notes from offset '
+                            '\'%s\' from folder ID \'%s\' succeeded but the DiFi'
+                            ' request failed:\n\n%s\n'
+                            % (note_offset, folder_ID, response))
+
+        # Actual note data is returned in HTML - note that this is actually a
+        # preview (corrupted URLs and linebreaks), so notes must still be fetched
+        # individually
+        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'])  # pylint: disable=line-too-long
+
+        notes = []
+        for listitem_tag in html_data.select('li.note'):
+
+            # Fetching note details and validating
+            note_details = listitem_tag.select_one('.note-details')
+            if not note_details:
+                raise Exception('Unable to parse note details from the following'
+                                ' note HTML:\n\n%s\n\nProblem occurred while '
+                                'fetching notes from offset \'%s\' from folder '
+                                'ID \'%s\'' % (listitem_tag, note_offset,
+                                               folder_ID))
+
+            # Fetching note ID and validating
+            note_details_link = note_details.select_one('span > a')
+            if not note_details_link:
+                raise Exception('Unable to parse note details link from the '
+                                ' following note HTML:\n\n%s\n\nProblem occurred'
+                                ' while fetching notes from offset \'%s\' from '
+                                'folder ID \'%s\''
+                                % (listitem_tag, note_offset, folder_ID))
+            if 'data-noteid' not in note_details_link.attrs:
+                raise Exception('Unable to obtain note ID from note details link'
+                                ' from the following note HTML:\n\n%s\n\nProblem'
+                                ' occurred while fetching notes from offset '
+                                '\'%s\' from folder ID \'%s\''
+                                % (listitem_tag, note_offset, folder_ID))
+            note_ID = note_details_link.attrs['data-noteid']
+
+            # Fetching the note text and metadata separately - it turns out that
+            # at this level you really do just get a preview, which has corrupted
+            # links and collapsed newlines
+            notes.append(self.get_note_in_folder(folder_ID, note_ID))
+
+        return notes
 
 
     def last_page_content(self):
+        '''The last normal page loaded by requests'''
+
         return self.__last_content
 
 
     def login(self):
+        '''Login to deviantART'''
 
         # You need to fetch the login page first as the login form contains some
         # dynamic hidden fields. Using a Session object persists cookies and
@@ -393,9 +707,9 @@ class DeviantArtService(object):
         self.__last_content = bs4.BeautifulSoup(self.__r.content)
 
 
-# Note that this class is used for both comments and replies, as the latter
-# are basically comments. Replies are called 'Feedback Messages' on dA
 class Comment:
+    '''Represents a comment or reply (the latter is basically a comment. Replies
+    are called 'Feedback Messages' on deviantART'''
 
     # pylint: disable=too-few-public-methods, too-many-arguments
 
@@ -427,10 +741,11 @@ class Comment:
 
 
 class Deviation:
+    '''Represents a deviation'''
 
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, ID, title, ts, URL, username):
+    def __init__(self, ID, title, ts, URL, username):  # pylint: disable=too-many-arguments
 
         self.ID = ID
         self.title = title
@@ -456,15 +771,66 @@ class Deviation:
         return not self.__eq__(other)
 
 
-# Doesn't look like normal note content is made available in the difi call
 class Note:
+    '''Represents a note'''
 
+    # pylint: disable=too-few-public-methods
+
+    # Notes have normally been populated via the MessageCenter view, which
+    # doesn't include the note text - however this is now available
+    # Rather than a Note, this is more a 'note view', since one Note can be in
+    # more than one NoteFolder (e.g. Inbox and Starred) - however I want to keep
+    # things simple currently and stick with one folder ID per Note object
+    # TODO: Make note text and folder_ID initialised immediately
     def __init__(self, ID, title, who, ts):
+
+        # Making sure ID is an int if it is passed in as a string (this is
+        # relied on for comparisons, the ID increments over time)
+        if isinstance(ID, str):
+            if not ID.isdigit():
+                raise Exception('Unable to instantiate note with non integer ID'
+                                ' \'%s\'!' % ID)
+            ID = int(ID)
 
         self.ID = ID
         self.title = title
         self.who = who
         self.ts = ts
+        self.text = None
+        self.folder_ID = None
+
+
+    def __hash__(self, *args, **kwargs):
+
+        # Defining hashable interface based on ID so that the object can be
+        # used in a set
+        return self.ID
+
+    def __eq__(self, other):
+
+        # Required comparison operations for set membership etc
+        return hash(self) == hash(other)
+
+    def __neq__(self, other):
+
+        # Required comparison operations for set membership etc
+        return not self.__eq__(other)
+
+
+class NoteFolder:
+    '''Represents a default or custom folder for notes (in reality a view on
+    applicable notes in deviantART'''
+
+    # pylint: disable=too-few-public-methods
+
+    def __init__(self, ID, title):
+
+        # ID is actually text, can be actual strings like 'unread'
+        self.ID = ID
+        self.title = title
+
+        # Useful stat to use as a heuristic for unnoticed change detection
+        self.site_note_count = None
 
     def __hash__(self, *args, **kwargs):
 
@@ -484,8 +850,62 @@ class Note:
 
 
 def extract_text(html_text, collapse_lines=False):
+    '''Extract lines of text from HTML tags - this honours linebreaks'''
 
-    # Extract lines of text from HTML tags - this honours linebreaks. Strings
-    # is a generator
-    text = '\n'.join(bs4.BeautifulSoup(html_text).strings)
+    # Strings is a generator
+    # Cope with html_text when it is already a BeautifulSoup tag
+    if isinstance(html_text, str):
+        html_text = bs4.BeautifulSoup(html_text)
+    text = '\n'.join(html_text.strings)
     return text if not collapse_lines else text.replace('\n', ' ')
+
+
+def format_note_folder_id(folder_ID):
+    '''Dealing with special folder_IDs that are genuinely strings (e.g.
+    unread') - these need to be speechmark-delimited for deviantART not to
+    raise a bullshit error about the class name'''
+
+    if not folder_ID.isdigit():
+        return '"%s"' % folder_ID
+    else:
+        return folder_ID
+
+
+def get_new(state, messages_type):
+    '''Determining what new messages have been fetched'''
+
+    # Dealing with different message types requested
+    if messages_type == COMMENTS:
+        return set(state.comments) - set(state.old_comments)
+    elif messages_type == REPLIES:
+        return set(state.replies) - set(state.old_replies)
+    elif messages_type == UNREAD_NOTES:
+        return set(state.unread_notes) - set(state.old_unread_notes)
+    elif messages_type == DEVIATIONS:
+        return set(state.deviations) - set(state.old_deviations)
+    else:
+
+        # Invalid messages_type passed
+        raise Exception('get_new was called with an invalid messages_type'
+                        ' (%s)' % messages_type)
+
+
+def validate_difi_response(response, call_numbers):
+    '''Determining if the overall DiFi page call and all associated function
+    calls were successful or not'''
+
+    # Making sure call_numbers is iterable - e.g. just one call number was
+    # passed
+    if not isinstance(call_numbers, collections.Sequence):
+        call_numbers = [call_numbers]
+
+    # Failing if overall call failed
+    if response['DiFi']['status'] != 'SUCCESS':
+        return False
+
+    # Failing if any one call failed
+    for call_number in call_numbers:
+        if response['DiFi']['response']['calls'][call_number]['response']['status'] != 'SUCCESS':  # pylint: disable=line-too-long
+            return False
+
+    return True
