@@ -262,6 +262,18 @@ class DeviantArtService(object):
                                   int(hit['ts']))
                              for hit in response['DiFi']['response']['calls'][UNREAD_NOTES]['response']['content'][0]['result']['hits']]  # pylint: disable=line-too-long
         state.unread_notes_count = response['DiFi']['response']['calls'][UNREAD_NOTES]['response']['content'][0]['result']['count']  # pylint: disable=line-too-long
+
+        # Fetching note text for unread notes
+        for note in state.unread_notes:
+            try:
+                unread_note = self.get_note_in_folder('unread', note.ID)
+            except Exception as e:
+                raise Exception('Unable to get text of unread note ID \'%s\', '
+                                'title \'%s\':\n\n%s\n\n%s\n'
+                                % (note.ID, note.title, e,
+                                   traceback.format_exc()))
+            note.text = unread_note.text
+
         state.deviations = [Deviation(hit['msgid'],
                                      extract_text(hit['title'], True),
                                      int(hit['ts']), hit['url'],
@@ -684,7 +696,7 @@ class DeviantArtService(object):
                             % (e, traceback.format_exc()))
 
         # Debug code
-        #print('validate_token: %s\nvalidate_key: %s'% (validate_token,
+        # print('validate_token: %s\nvalidate_key: %s'% (validate_token,
         #                                               validate_key))
 
         # Logging in to deviantART - this gets me the cookies that I can then
