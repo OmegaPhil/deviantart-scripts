@@ -256,23 +256,20 @@ class DeviantArtService(object):
                         for hit in response['DiFi']['response']['calls'][REPLIES]['response']['content'][0]['result']['hits']]  # pylint: disable=line-too-long
         state.replies_count = response['DiFi']['response']['calls'][REPLIES]['response']['content'][0]['result']['count']  # pylint: disable=line-too-long
 
-        state.unread_notes = [Note(int(hit['msgid']),
-                                  extract_text(hit['title'], True),
-                                  extract_text(hit['who'], True),
-                                  int(hit['ts']))
-                             for hit in response['DiFi']['response']['calls'][UNREAD_NOTES]['response']['content'][0]['result']['hits']]  # pylint: disable=line-too-long
-        state.unread_notes_count = response['DiFi']['response']['calls'][UNREAD_NOTES]['response']['content'][0]['result']['count']  # pylint: disable=line-too-long
-
-        # Fetching note text for unread notes
-        for note in state.unread_notes:
+        # Special processing needs to be done for notes to fetch the text
+        state.unread_notes = []
+        for hit in response['DiFi']['response']['calls'][UNREAD_NOTES]['response']['content'][0]['result']['hits']:  # pylint: disable=line-too-long
+            note_ID = int(hit['msgid'])
+            note_title = extract_text(hit['title'], True)
             try:
-                unread_note = self.get_note_in_folder('unread', note.ID)
+                state.unread_notes.append(self.get_note_in_folder('unread',
+                                                                  note_ID))
             except Exception as e:
                 raise Exception('Unable to get text of unread note ID \'%s\', '
                                 'title \'%s\':\n\n%s\n\n%s\n'
-                                % (note.ID, note.title, e,
+                                % (note_ID, note_title, e,
                                    traceback.format_exc()))
-            note.text = unread_note.text
+        state.unread_notes_count = len(state.unread_notes)
 
         state.deviations = [Deviation(hit['msgid'],
                                      extract_text(hit['title'], True),
@@ -486,9 +483,8 @@ class DeviantArtService(object):
         note_text = div_wraptext.text.strip()
 
         # Finally instantiating the note
-        note = Note(note_ID, note_title, note_sender, note_timestamp)
-        note.text = note_text
-        note.folder_ID = folder_ID
+        note = Note(note_ID, note_title, note_sender, note_timestamp, note_text,
+                    folder_ID)
 
         return note
 
@@ -795,8 +791,7 @@ class Note:
     # Rather than a Note, this is more a 'note view', since one Note can be in
     # more than one NoteFolder (e.g. Inbox and Starred) - however I want to keep
     # things simple currently and stick with one folder ID per Note object
-    # TODO: Make note text and folder_ID initialised immediately
-    def __init__(self, ID, title, who, ts):
+    def __init__(self, ID, title, who, ts, text, folder_ID):
 
         # Making sure ID is an int if it is passed in as a string (this is
         # relied on for comparisons, the ID increments over time)
@@ -810,8 +805,8 @@ class Note:
         self.title = title
         self.who = who
         self.ts = ts
-        self.text = None
-        self.folder_ID = None
+        self.text = text
+        self.folder_ID = folder_ID
 
 
     def __hash__(self, *args, **kwargs):
