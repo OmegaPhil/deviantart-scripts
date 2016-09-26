@@ -97,7 +97,7 @@ def load_config():
     global config  # pylint: disable=global-statement
 
     # Loading configuration if it exists
-    config_directory = os.path.expanduser('~/.config/deviantart-checker')
+    config_directory = os.path.expanduser('~/.config/deviantart-scripts')
     config_file_path = os.path.join(config_directory, 'deviantart-checker.conf')
     if os.path.exists(config_file_path):
 
@@ -154,7 +154,7 @@ def poll_service():
     # Logging in to deviantART - any errors here will be fatal and are handled
     # in the main scope
     dA = devart.DeviantArtService(config['username'], config['password'])
-    state = devart.AccountState('~/.cache/deviantart-checker/state.txt')
+    state = devart.AccountState('~/.cache/deviantart-scripts/deviantart-checker-state.txt')
 
     # Looping for regular message fetching
     while True:

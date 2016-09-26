@@ -176,7 +176,7 @@ def load_config():
     global config
 
     # Loading configuration if it exists
-    config_directory = os.path.expanduser('~/.config/deviantart-notes-downloader')
+    config_directory = os.path.expanduser('~/.config/deviantart-scripts')
     config_file_path = os.path.join(config_directory, 'deviantart-notes-downloader.conf')
     if os.path.exists(config_file_path):
 
