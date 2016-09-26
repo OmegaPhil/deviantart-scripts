@@ -420,6 +420,22 @@ class DeviantArtService(object):
                             % (html_data.text, note_ID, folder_ID))
         note_sender = sender_span.attrs['username']
 
+        # Fetching recipient details and validating (this has meaning in the
+        # sent folder)
+        recipient_span = html_data.select_one('span.mcb-to')
+        if not recipient_span:
+            raise Exception('Unable to obtain note recipient (recipient span) '
+                            'from the following note HTML:\n\n%s\n\nProblem '
+                            'occurred while fetching note ID \'%s\' from folder'
+                            ' ID \'%s\'' % (html_data.text, note_ID, folder_ID))
+        recipient_link = recipient_span.select_one('a.username')
+        if not recipient_link:
+            raise Exception('Unable to obtain note recipient (recipient link) '
+                            'from the following note HTML:\n\n%s\n\nProblem '
+                            'occurred while fetching note ID \'%s\' from folder'
+                            ' ID \'%s\'' % (html_data.text, note_ID, folder_ID))
+        note_recipient = recipient_link.text
+
         # Fetching timestamp and validating
         timestamp_span = html_data.select_one('span.mcb-ts')
         if not timestamp_span:
@@ -483,8 +499,8 @@ class DeviantArtService(object):
         note_text = div_wraptext.text.strip()
 
         # Finally instantiating the note
-        note = Note(note_ID, note_title, note_sender, note_timestamp, note_text,
-                    folder_ID)
+        note = Note(note_ID, note_title, note_sender, note_recipient,
+                    note_timestamp, note_text, folder_ID)
 
         return note
 
@@ -791,7 +807,7 @@ class Note:
     # Rather than a Note, this is more a 'note view', since one Note can be in
     # more than one NoteFolder (e.g. Inbox and Starred) - however I want to keep
     # things simple currently and stick with one folder ID per Note object
-    def __init__(self, ID, title, who, ts, text, folder_ID):
+    def __init__(self, ID, title, sender, recipient, ts, text, folder_ID):
 
         # Making sure ID is an int if it is passed in as a string (this is
         # relied on for comparisons, the ID increments over time)
@@ -803,7 +819,8 @@ class Note:
 
         self.ID = ID
         self.title = title
-        self.who = who
+        self.sender = sender
+        self.recipient = recipient
         self.ts = ts
         self.text = text
         self.folder_ID = folder_ID

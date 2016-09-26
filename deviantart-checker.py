@@ -315,22 +315,22 @@ def summarise_changes(messages, messages_type):
     elif messages_type == devart.UNREAD_NOTES:
 
         # Sorting unread notes based on sender then title
-        new_unread_notes = sorted([(note.who, note.title, note.text)
+        new_unread_notes = sorted([(note.sender, note.title, note.text)
                                    for note in messages],
                                   key=lambda note: (note[0], note[1]))
 
         # Generating and returning summary, now including note text
         current_sender = None
         summary = []
-        for who, title, text in new_unread_notes:
-            if current_sender != who:
-                summary.append('\n' + who + ' sent:\n')
-                current_sender = who
+        for sender, title, text in new_unread_notes:
+            if current_sender != sender:
+                summary.append('\n' + sender + ' sent:\n')
+                current_sender = sender
             summary += [title, '=' * len(title), text, '\n']
 
             # Keeping record of users causing the updates
-            if not who in users:
-                users.append(who)
+            if not sender in users:
+                users.append(sender)
 
         return 'New Unread Notes', '\n'.join(summary), users
 

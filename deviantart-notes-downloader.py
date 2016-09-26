@@ -227,6 +227,7 @@ def prepare_database(database_path):
             id integer primary key not null,
             title text not null,
             sender text not null,
+            recipient text not null,
             timestamp integer not null,
             text text not null);
         create table if not exists tbl_folder ( 
@@ -254,11 +255,11 @@ def record_note(note):
     # inserting in - however since one note can appear in many folders (e.g.
     # Inbox and Starred), insert or ignore is used
     con.execute('''
-        insert or ignore into tbl_note(id, title, sender, timestamp, text)
-        values(:id, :title, :sender, :timestamp, :text);
+        insert or ignore into tbl_note(id, title, sender, recipient, timestamp, text)
+        values(:id, :title, :sender, :recipient, :timestamp, :text);
         ''',
-        {'id': note.ID, 'title': note.title, 'sender': note.who,
-         'timestamp': note.ts, 'text':note.text})
+        {'id': note.ID, 'title': note.title, 'sender': note.sender,
+         'recipient': note.recipient, 'timestamp': note.ts, 'text':note.text})
     con.execute('''
         insert into tbl_note_folders(fk_note_id, fk_folder_id)
         values(:id, :folder_id);
@@ -268,8 +269,9 @@ def record_note(note):
 
     if options.verbose:
         print('New note recorded, ID: \'%s\', title: \'%s\', sender: \'%s\', '
-              'timestamp: \'%s\', folder ID: \'%s\''
-              % (note.ID, note.title, note.who, note.ts, note.folder_ID))
+              'recipient: \'%s\', timestamp: \'%s\', folder ID: \'%s\''
+              % (note.ID, note.title, note.sender, note.recipient, note.ts,
+                 note.folder_ID))
 
 
 def record_note_folder(note_folder):
