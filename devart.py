@@ -430,10 +430,16 @@ class DeviantArtService(object):
                             ' ID \'%s\'' % (html_data.text, note_ID, folder_ID))
         recipient_link = recipient_span.select_one('a.username')
         if not recipient_link:
-            raise Exception('Unable to obtain note recipient (recipient link) '
-                            'from the following note HTML:\n\n%s\n\nProblem '
-                            'occurred while fetching note ID \'%s\' from folder'
-                            ' ID \'%s\'' % (html_data.text, note_ID, folder_ID))
+
+            # Banned users have their username displayed differently, e.g.:
+            # '<span class="mcb-to">to <span class="username-with-symbol"><span class="banned username">CrimsonColt7</span><span class="user-symbol banned" data-gruser-type="banned" data-quicktip-text="Banned or Deactivated/Closed Account" data-show-tooltip="1"></span></span></span>'
+            recipient_link = recipient_span.select_one('span.username')
+            if not recipient_link:
+                raise Exception('Unable to obtain note recipient (recipient '
+                                'link) from the following note HTML:\n\n%s\n\n'
+                                'Problem occurred while fetching note ID \'%s\''
+                                'from folder ID \'%s\''
+                                % (html_data.text, note_ID, folder_ID))
         note_recipient = recipient_link.text
 
         # Fetching timestamp and validating
