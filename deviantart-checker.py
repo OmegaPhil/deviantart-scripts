@@ -41,13 +41,11 @@ This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.
 '''
 
-# pylint: disable=missing-docstring, no-self-use, too-few-public-methods
-# pylint: disable=too-many-arguments
-
 config = {}
 
 
 def generate_command_fragments(command, subject, message):
+    '''Prepare command with variable substitution'''
 
     # Substituting values into command to call in the normal way for
     # the subject since that is essentially fixed - content is not
@@ -64,6 +62,7 @@ def generate_command_fragments(command, subject, message):
 
 
 def handle_unknown_error(err):
+    '''Handle unknown error'''
 
     # pylint: disable=line-too-long
     # I have decided to just log failures rather than die - this is
@@ -93,6 +92,7 @@ def handle_unknown_error(err):
 
 
 def load_config():
+    '''Load config'''
 
     global config  # pylint: disable=global-statement
 
@@ -153,6 +153,7 @@ def load_config():
 
 
 def poll_service():
+    '''Main loop'''
 
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements
 
@@ -277,6 +278,7 @@ def poll_service():
 
 
 def summarise_changes(messages, messages_type):
+    '''A report summarising new messages of the relevant type'''
 
     # pylint: disable=redefined-outer-name, too-many-branches
     # pylint: disable=too-many-locals
