@@ -33,6 +33,9 @@ UNREAD_NOTES = 2
 DEVIATIONS = 3
 
 
+# pylint: disable=too-many-lines
+
+
 # Getting new-style class
 class AccountState(object):
     '''Maintains the current state of the deviantART account'''
@@ -362,7 +365,7 @@ class DeviantArtService(object):
     def get_note_in_folder(self, folder_ID, note_ID):
         '''Fetch a note from a folder'''
 
-        # pylint: disable=too-many-branches,too-many-locals
+        # pylint: disable=too-many-branches,too-many-locals,too-many-statements
 
         # Dealing with special folder_IDs - remember not to update the folder_ID
         # variable so that you don't permanently corrupt it
@@ -431,6 +434,7 @@ class DeviantArtService(object):
         recipient_link = recipient_span.select_one('a.username')
         if not recipient_link:
 
+            # pylint: disable=line-too-long
             # Banned users have their username displayed differently, e.g.:
             # '<span class="mcb-to">to <span class="username-with-symbol"><span class="banned username">CrimsonColt7</span><span class="user-symbol banned" data-gruser-type="banned" data-quicktip-text="Banned or Deactivated/Closed Account" data-show-tooltip="1"></span></span></span>'
             recipient_link = recipient_span.select_one('span.username')
@@ -671,6 +675,71 @@ class DeviantArtService(object):
         return notes
 
 
+    def get_unread_sent_notes(self):
+        '''Fetch up to 25 sent notes (one page's worth) that have not been read
+        by the recipient'''
+
+        try:
+
+            # The 'ui' field in the form is actually the 'userinfo' cookie -
+            # its not directly usable via the cookie value, have to urldecode.
+            # This is on top of having the correct login cookies...
+            data = {'c[]': ['"Notes","display_folder",[%s,%s,0]' % ('2', 0)],
+                     'ui': urllib.parse.unquote(self.__s.cookies['userinfo']),
+                     't': 'json'}
+            self.__r = self.__s.post(self.__difi_url, data=data, timeout=60)
+            self.__r.raise_for_status()
+
+        except Exception as e:
+            raise Exception('Unable to fetch sent notes from offset 0:\n\n'
+                            '%s\n\n%s\n' % (e, traceback.format_exc()))
+
+        # Making sure difi response and all contained calls are valid
+        response = self.__r.json()
+        if not validate_difi_response(response, range(1)):
+            raise Exception('The DiFi page request to fetch notes from offset 0'
+                            ' from folder ID \'%s\' succeeded but the DiFi'
+                            ' request failed:\n\n%s\n' % ('2', response))
+
+        # Actual note data is returned in HTML
+        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'])  # pylint: disable=line-too-long
+
+        # Luckily we can select precisely the unread notes here - the
+        # class-based CSS selector here isn't a hierarchy but defines a list
+        # item with both the note and unread classes
+        notes = []
+        for listitem_tag in html_data.select('li.note.unread'):
+
+            # Fetching note details and validating
+            note_details = listitem_tag.select_one('.note-details')
+            if not note_details:
+                raise Exception('Unable to parse note details from the following'
+                                ' note HTML:\n\n%s\n\nProblem occurred while '
+                                'fetching unsent notes from offset 0'
+                                % listitem_tag)
+
+            # Fetching note ID and validating
+            note_details_link = note_details.select_one('span > a')
+            if not note_details_link:
+                raise Exception('Unable to parse note details link from the '
+                                ' following note HTML:\n\n%s\n\nProblem occurred'
+                                ' while fetching unsent notes from offset 0'
+                                % listitem_tag)
+            if 'data-noteid' not in note_details_link.attrs:
+                raise Exception('Unable to obtain note ID from note details link'
+                                ' from the following note HTML:\n\n%s\n\nProblem'
+                                ' occurred while fetching unsent notes from '
+                                'offset 0' % listitem_tag)
+            note_ID = note_details_link.attrs['data-noteid']
+
+            # Fetching the note text and metadata separately - it turns out that
+            # at this level you really do just get a preview, which has corrupted
+            # links and collapsed newlines
+            notes.append(self.get_note_in_folder('2', note_ID))
+
+        return notes
+
+
     def last_page_content(self):
         '''The last normal page loaded by requests'''
 
@@ -806,7 +875,7 @@ class Deviation:
 class Note:
     '''Represents a note'''
 
-    # pylint: disable=too-few-public-methods
+    # pylint: disable=too-few-public-methods,too-many-arguments
 
     # Notes have normally been populated via the MessageCenter view, which
     # doesn't include the note text - however this is now available
