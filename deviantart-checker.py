@@ -96,27 +96,32 @@ def load_config():
 
     global config  # pylint: disable=global-statement
 
-    # Loading configuration if it exists
+    # Loading configuration if it exists. Credentials has been split out into
+    # its own file so that it can be shared amongst various scripts
     config_directory = os.path.expanduser('~/.config/deviantart-scripts')
     config_file_path = os.path.join(config_directory, 'deviantart-checker.conf')
-    if os.path.exists(config_file_path):
+    credentials_file_path = os.path.join(config_directory, 'credentials.conf')
+    if (os.path.exists(config_file_path)
+        and os.path.exists(credentials_file_path)):
 
-        # Loading YAML document
+        # Loading YAML documents - theres no need for them to be genuinely
+        # separate documents, so just sticking them together
         try:
-            with io.open(config_file_path, 'r') as config_file:
-                config = yaml.load(config_file, yaml.CLoader)
+            config_text = (io.open(config_file_path, 'r').read() + '\n' +
+                            io.open(credentials_file_path, 'r').read())
+            config = yaml.load(config_text, yaml.CLoader)
             if config is None:
-                raise Exception('YAML document empty')
+                raise Exception('YAML documents empty')
         except Exception as e:
-            raise Exception('Unable to load config from YAML document '
-                            '(\'%s\'):\n\n%s\n\n%s\n'
-                            % (config_file_path, str(e),
+            raise Exception('Unable to load config from YAML documents '
+                            '\'%s\' and \'%s\':\n\n%s\n\n%s\n'
+                            % (config_file_path, credentials_file_path, str(e),
                                traceback.format_exc()))
 
     # Ensuring required settings exist
     if 'username' not in config or 'password' not in config:
         raise Exception('Please ensure a deviantART username and password is '
-                        'configured in \'%s\'' % config_file_path)
+                        'configured in \'%s\'' % credentials_file_path)
     if 'command_to_run' not in config:
         raise Exception('Please ensure command_to_run is configured in \'%s\'' %
                         config_file_path)
