@@ -17,8 +17,9 @@ Requirements
 
 Tested with (if you get it working on earlier versions please say, all available in Debian repos):
 
-Python v3.4
+Python v3.4+
 Beautiful Soup v4.3.2: http://www.crummy.com/software/BeautifulSoup/
+lxml v3.6.4 (used as the HTML parser with Beautiful Soup): http://lxml.de/
 Requests v2.3.0: http://python-requests.org
 python-YAML v3.11: http://pyyaml.org/
 

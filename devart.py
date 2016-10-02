@@ -217,7 +217,7 @@ class DeviantArtService(object):
                             % (deviation_offset, e, traceback.format_exc()))
 
         # Parsing page
-        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+        self.__last_content = bs4.BeautifulSoup(self.__r.content, 'lxml')
 
         # Locating the main stream div (it turns out that classes like 'tt-a'
         # are also used outside of the deviations listing)
@@ -317,7 +317,7 @@ class DeviantArtService(object):
                             % (deviation_URL, e, traceback.format_exc()))
 
         # Parsing page
-        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+        self.__last_content = bs4.BeautifulSoup(self.__r.content, 'lxml')
 
         # Determining deviation ID
         try:
@@ -390,7 +390,7 @@ class DeviantArtService(object):
                             % (deviation_folder_URL, e, traceback.format_exc()))
 
         # Parsing page
-        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+        self.__last_content = bs4.BeautifulSoup(self.__r.content, 'lxml')
 
         # Determining deviation folder ID
         match = re.match(r'^.+/([0-9]+)/.+$', deviation_folder_URL)
@@ -562,7 +562,7 @@ class DeviantArtService(object):
                             '\n' % (e, traceback.format_exc()))
 
         # Parsing page
-        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+        self.__last_content = bs4.BeautifulSoup(self.__r.content, 'lxml')
 
         # Determining list of note folders
         note_folders = []
@@ -635,7 +635,7 @@ class DeviantArtService(object):
                             % (note_ID, folder_ID, response))
 
         # Actual note data is returned in HTML
-        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'])  # pylint: disable=line-too-long
+        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'], 'lxml')  # pylint: disable=line-too-long
 
         # Fetching note title and validating
         note_span = html_data.select_one('span.mcb-title')
@@ -778,7 +778,7 @@ class DeviantArtService(object):
                                 % (offset, folder_ID, response))
 
             # Actual note data is returned in HTML
-            html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'])  # pylint: disable=line-too-long
+            html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'], 'lxml')  # pylint: disable=line-too-long
 
             for listitem_tag in html_data.select('li.note'):
 
@@ -860,7 +860,7 @@ class DeviantArtService(object):
         # Actual note data is returned in HTML - note that this is actually a
         # preview (corrupted URLs and linebreaks), so notes must still be fetched
         # individually
-        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'])  # pylint: disable=line-too-long
+        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'], 'lxml')  # pylint: disable=line-too-long
 
         notes = []
         for listitem_tag in html_data.select('li.note'):
@@ -925,7 +925,7 @@ class DeviantArtService(object):
                             ' request failed:\n\n%s\n' % ('2', response))
 
         # Actual note data is returned in HTML
-        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'])  # pylint: disable=line-too-long
+        html_data = bs4.BeautifulSoup(response['DiFi']['response']['calls'][0]['response']['content']['body'], 'lxml')  # pylint: disable=line-too-long
 
         # Luckily we can select precisely the unread notes here - the
         # class-based CSS selector here isn't a hierarchy but defines a list
@@ -986,7 +986,7 @@ class DeviantArtService(object):
                             '\n' % (e, traceback.format_exc()))
 
         # Parsing page
-        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+        self.__last_content = bs4.BeautifulSoup(self.__r.content, 'lxml')
 
         # Locating login form
         login_form = self.__last_content.find('form', id='form-login')
@@ -1028,7 +1028,7 @@ class DeviantArtService(object):
         self.logged_in = True
 
         # Updating recorded page content
-        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+        self.__last_content = bs4.BeautifulSoup(self.__r.content, 'lxml')
 
 
 class Comment:
@@ -1258,7 +1258,7 @@ def extract_text(html_text, collapse_lines=False):
     # Strings is a generator
     # Cope with html_text when it is already a BeautifulSoup tag
     if isinstance(html_text, str):
-        html_text = bs4.BeautifulSoup(html_text)
+        html_text = bs4.BeautifulSoup(html_text, 'lxml')
     text = '\n'.join(html_text.strings)
     return text if not collapse_lines else text.replace('\n', ' ')
 
