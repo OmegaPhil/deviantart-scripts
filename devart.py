@@ -19,6 +19,7 @@ import collections
 import datetime
 import io
 import os.path
+import re
 import traceback
 import urllib.parse
 
@@ -188,6 +189,241 @@ class DeviantArtService(object):
                             'folders:\n\n%s\n' % response)
 
 
+    def get_all_deviations(self, username, deviation_offset):
+        '''Fetch the IDs, titles, links and folders associated with all
+        deviations via the gallery page -> All link, with the offset allowing
+        you to page through the results (max 120 are returned by deviantART).
+        Full deviation detail should be fetched separately per deviation when
+        you need it'''
+
+        # pylint: disable=too-many-locals
+
+        try:
+
+            # Determining gallery URL
+            gallery_url = 'https://%s.deviantart.com/gallery/' % username
+
+            # The catpath parameter is the 'all' selector
+            params = {'catpath': '/', 'offset': deviation_offset}
+
+            # I don't yet know of any DiFi way to do this that actually works,
+            # so just fetching the pages as usual
+            self.__r = self.__s.get(gallery_url, params=params, timeout=60)
+            self.__r.raise_for_status()
+
+        except Exception as e:
+            raise Exception('Unable to load all deviations gallery page from '
+                            'offset \'%s\':\n\n%s\n\n%s\n'
+                            % (deviation_offset, e, traceback.format_exc()))
+
+        # Parsing page
+        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+
+        # Locating the main stream div (it turns out that classes like 'tt-a'
+        # are also used outside of the deviations listing)
+        div_deviations = (self.__last_content.
+                          select_one('div#gmi-EditableResourceStream'))
+        if div_deviations is None:
+            raise Exception('Unable to locate the main div containing the '
+                            'deviations in the gallery page - HTML:\n\n%s\n'
+                            % self.__last_content)
+
+        known_deviation_folders = {}
+        deviations = []
+        for div_deviation in div_deviations.select('div.tt-a'):
+
+            # Fetching the main link tag and validating
+            link_tag = div_deviation.select_one('a.t')
+            if link_tag is None:
+                raise Exception('Unable to fetch the main link tag from the '
+                                'following deviation div:\n\n%s\n\nProblem '
+                                'occurred while fetching all deviations from '
+                                'offset \'%s\''
+                                % div_deviation, deviation_offset)
+
+            # href will always be present in a link tag
+            deviation_URL = link_tag.attrs['href']
+
+            # Fetching deviation ID
+            try:
+                deviation_ID = deviation_url_to_id(deviation_URL)
+            except Exception as e:
+                raise Exception('Unable to extract deviation ID from link '
+                                '\'%s\'. Problem occurred while fetching all '
+                                'deviations from offset \'%s\''
+                                % (deviation_URL, deviation_offset))
+
+            # Fetching deviation title and validating
+            if 'title' not in link_tag.attrs:
+                raise Exception('Deviation title is not present in the following'
+                                ' link tag:\n\n%s\n\nProblem occurred'
+                                ' while fetching all deviations from offset '
+                                '\'%s\'' % (link_tag, deviation_offset))
+            match = re.match(r'(.+) by %s.*' % username, link_tag.attrs['title'])
+            if match is None:
+                raise Exception('Unable to extract deviation title from text '
+                                '\'%s\'. Problem occurred while fetching all '
+                                'deviations from offset \'%s\''
+                                % (link_tag.attrs['title'], deviation_offset))
+            deviation_title = match.groups()[0]
+
+            # Fetching deviation folders involved and validating (being
+            # associated with no folders is perfectly acceptable)
+            folder_link_tags = div_deviation.select('span.gallections a')
+            deviation_folders = []
+            for folder_link_tag in folder_link_tags:
+                folder_URL = folder_link_tag.attrs['href']
+                folder_title = folder_link_tag.text
+
+                # Caching deviation folders so that you don't have to fetch the
+                # folder page every time to get the description
+                if folder_title in known_deviation_folders:
+
+                    # Folder has already been fetched - using current data
+                    deviation_folders.append(known_deviation_folders[folder_title])
+
+                else:
+
+                    # Folder is new - fetching full information from its page (
+                    # description isn't available otherwise)
+                    deviation_folder = self.get_deviation_folder(folder_URL)
+                    deviation_folders.append(deviation_folder)
+
+                    # Adding to cache
+                    known_deviation_folders[folder_title] = deviation_folder
+
+            # All deviation detail fetched, constructing
+            deviations.append(Deviation(deviation_ID, deviation_title,
+                                        deviation_URL, username,
+                                        folders=deviation_folders))
+
+        return deviations
+
+
+    def get_deviation(self, deviation_URL):
+        '''Fetch all deviation information bar folders for the specified
+        deviation URL (folders are only available via the gallery page)'''
+
+        try:
+
+            # I don't yet know of any DiFi way to do this that actually works,
+            # so just fetching the pages as usual
+            self.__r = self.__s.get(deviation_URL, timeout=60)
+            self.__r.raise_for_status()
+
+        except Exception as e:
+            raise Exception('Unable to load the deviation page from the '
+                            'specified URL \'%s\':\n\n%s\n\n%s\n'
+                            % (deviation_URL, e, traceback.format_exc()))
+
+        # Parsing page
+        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+
+        # Determining deviation ID
+        try:
+            deviation_ID = deviation_url_to_id(deviation_URL)
+        except Exception as e:
+            raise Exception('Unable to extract deviation ID from link \'%s\''
+                            % deviation_URL)
+
+        # Fetching the title link tag and validating
+        title_link_tag = self.__last_content.select_one('h1 a')
+        if title_link_tag is None:
+            raise Exception('Unable to fetch the title link tag from the '
+                            'deviation link \'%s\', HTML:n\n%s\n'
+                            % (deviation_URL, self.__last_content))
+        deviation_title = title_link_tag.text
+
+        # Fetching the username link tag and validating
+        username_link_tag = self.__last_content.select_one('a.username')
+        if username_link_tag is None:
+            raise Exception('Unable to fetch the username link tag from the '
+                            'deviation link \'%s\', HTML:n\n%s\n'
+                            % (deviation_URL, self.__last_content))
+        username = username_link_tag.text
+
+        # Fetching timestamp span and validating
+        timestamp_span_tag = (self.__last_content
+                              .select_one('div.dev-metainfo-details dd span'))
+        if timestamp_span_tag is None:
+            raise Exception('Unable to fetch the timestamp span tag from the '
+                            'deviation link \'%s\', HTML:n\n%s\n'
+                            % (deviation_URL, self.__last_content))
+        if 'ts' not in timestamp_span_tag.attrs:
+            raise Exception('Unable to fetch the timestamp from the '
+                            'deviation link \'%s\' - span tag:n\n%s\n'
+                            % (deviation_URL, timestamp_span_tag))
+        timestamp = timestamp_span_tag.attrs['ts']
+
+        # Fetching the description div tag and validating - some deviations
+        # genuinely don't have a description - in this case the div.text tag
+        # is not present
+        description_div_tag = self.__last_content.select_one('div.text')
+        if description_div_tag is None:
+            deviation_description = ''
+        else:
+
+            # Turn deviantART post into sensible text
+            deviation_description = deviantart_post_to_text(description_div_tag)
+
+        # Can't get at folder information here, seems only the gallery pages
+        # show this
+
+        # All deviation detail fetched, constructing
+        return Deviation(deviation_ID, deviation_title, deviation_URL, username,
+                         timestamp, deviation_description)
+
+
+    def get_deviation_folder(self, deviation_folder_URL):
+        '''Fetch deviation folder information from its gallery page'''
+
+        try:
+
+            # I don't yet know of any DiFi way to do this that actually works,
+            # so just fetching the pages as usual
+            self.__r = self.__s.get(deviation_folder_URL, timeout=60)
+            self.__r.raise_for_status()
+
+        except Exception as e:
+            raise Exception('Unable to load the deviation folder page from the '
+                            'specified URL \'%s\':\n\n%s\n\n%s\n'
+                            % (deviation_folder_URL, e, traceback.format_exc()))
+
+        # Parsing page
+        self.__last_content = bs4.BeautifulSoup(self.__r.content)
+
+        # Determining deviation folder ID
+        match = re.match(r'^.+/([0-9]+)/.+$', deviation_folder_URL)
+        if match is None:
+            raise Exception('Unable to extract deviation folder ID from link '
+                            '\'%s\'' % deviation_folder_URL)
+        deviation_folder_ID = int(match.groups()[0])
+
+        # Fetching folder title span and validating
+        folder_title_span = self.__last_content.select_one('span.folder-title')
+        if folder_title_span is None:
+            raise Exception('Unable to fetch the deviation folder title span '
+                            'tag from the deviation folder link \'%s\', HTML:'
+                            'n\n%s\n'
+                            % (deviation_folder_URL, self.__last_content))
+        deviation_folder_title = folder_title_span.text
+
+        # Fetching folder description div and validating - when a folder has
+        # no description, the div still appears but with no text, which is fine
+        folder_description_div = (self.__last_content
+                                  .select_one('div.description.text'))
+        if folder_description_div is None:
+            raise Exception('Unable to fetch the deviation folder description '
+                            'div tag from the deviation folder link \'%s\', '
+                            'HTML:n\n%s\n'
+                            % (deviation_folder_URL, self.__last_content))
+        deviation_folder_description = folder_description_div.text
+
+        return DeviationFolder(deviation_folder_ID, deviation_folder_title,
+                               deviation_folder_description,
+                               deviation_folder_URL)
+
+
     def get_messages(self, state):
         '''Fetch new messages from deviantART'''
 
@@ -276,8 +512,9 @@ class DeviantArtService(object):
 
         state.deviations = [Deviation(hit['msgid'],
                                      extract_text(hit['title'], True),
-                                     int(hit['ts']), hit['url'],
-                                     extract_text(hit['username'], True))
+                                     hit['url'],
+                                     extract_text(hit['username'], True),
+                                     int(hit['ts']))
                            for hit in response['DiFi']['response']['calls'][DEVIATIONS]['response']['content'][0]['result']['hits']]  # pylint: disable=line-too-long
         state.deviations_count = response['DiFi']['response']['calls'][DEVIATIONS]['response']['content'][0]['result']['count']  # pylint: disable=line-too-long
         state.save_state()
@@ -491,22 +728,8 @@ class DeviantArtService(object):
                             'fetching note ID \'%s\' from from folder ID \'%s\''
                             % (html_data, note_ID, folder_ID))
 
-        # Turn links in the div to text links without the deviantART redirector
-        for link_tag in div_wraptext.select('a'):
-            if 'http://' in link_tag.attrs['href']:
-                link_tag.string = link_tag.attrs['href'].replace(
-                            'http://www.deviantart.com/users/outgoing?', '')
-            else:
-                link_tag.string = link_tag.attrs['href'].replace(
-                            'https://www.deviantart.com/users/outgoing?', '')
-            link_tag.unwrap()
-
-        # Replace out linebreaks with newlines to ensure they get honoured
-        for linebreak in div_wraptext.select('br'):
-            linebreak.replace_with('\n')
-
-        # TODO: In the future I should textify things like smilies etc
-        note_text = div_wraptext.text.strip()
+        # Turn deviantART post into sensible text
+        note_text = deviantart_post_to_text(div_wraptext)
 
         # Finally instantiating the note
         note = Note(note_ID, note_title, note_sender, note_recipient,
@@ -844,22 +1067,45 @@ class Comment:
 class Deviation:
     '''Represents a deviation'''
 
-    # pylint: disable=too-few-public-methods
+    # pylint: disable=too-few-public-methods,too-many-arguments
 
-    def __init__(self, ID, title, ts, URL, username):  # pylint: disable=too-many-arguments
+    # Optional parameters to allow a for a more sparse Deviation object when
+    # representing all deviations through fetching the All gallery
+    # (see get_all_deviations) - fetching ts and description here when its not
+    # needed would be serious bloat (120 extra calls in just one page fetch of
+    # a gallery for data that wouldn't be used)
+    # Folders is a list of DeviationFolders that represent the deviation/gallery
+    # folders the deviation is part of
+    def __init__(self, ID, title, URL, username, ts=None, description=None,
+                 folders=None):
+
+        # Making sure ID is an int if it is passed in as a string (this is
+        # relied on for comparisons, the ID increments over time)
+        if isinstance(ID, str):
+            if not ID.isdigit():
+                raise Exception('Unable to instantiate deviation with non '
+                                'integer ID \'%s\'!' % ID)
+            ID = int(ID)
 
         self.ID = ID
         self.title = title
-        self.ts = ts
         self.URL = URL
         self.username = username
+        self.ts = ts
+        self.description = description
+
+        # Python can't cope with a list as a default value, so working around
+        # this here
+        if folders is None:
+            self.folders = []
+        else:
+            self.folders = folders
 
     def __hash__(self, *args, **kwargs):
 
         # Defining hashable interface based on ID so that the object can be
-        # used in a set. __hash__ must return an integer, however the
-        # deviantART IDs seem to be a string in the form <number>:<number>
-        return int(self.ID.split(':')[1])
+        # used in a set
+        return self.ID
 
     def __eq__(self, other):
 
@@ -870,6 +1116,52 @@ class Deviation:
 
         # Required comparison operations for set membership etc
         return not self.__eq__(other)
+
+    def __repr__(self):
+
+        # Return user-friendly title
+        return 'Deviation (\'%s\')' % self.title
+
+
+class DeviationFolder:
+    '''Represents a folder that a deviation is attached to in a user gallery'''
+
+    # pylint: disable=too-few-public-methods
+
+    def __init__(self, ID, title, description, URL):
+
+        # Making sure ID is an int if it is passed in as a string (this is
+        # relied on for comparisons, the ID increments over time)
+        if isinstance(ID, str):
+            if not ID.isdigit():
+                raise Exception('Unable to instantiate deviation folder with '
+                                'non integer ID \'%s\'!' % ID)
+            ID = int(ID)
+
+        self.ID = ID
+        self.title = title
+        self.description = description
+        self.URL = URL
+
+    def __hash__(self, *args, **kwargs):
+
+        # Defining hashable interface based on ID
+        return self.ID
+
+    def __eq__(self, other):
+
+        # Required comparison operations for set membership etc
+        return hash(self) == hash(other)
+
+    def __neq__(self, other):
+
+        # Required comparison operations for set membership etc
+        return not self.__eq__(other)
+
+    def __repr__(self):
+
+        # Return user-friendly title
+        return 'DeviationFolder (\'%s\')' % self.title
 
 
 class Note:
@@ -917,6 +1209,11 @@ class Note:
         # Required comparison operations for set membership etc
         return not self.__eq__(other)
 
+    def __repr__(self):
+
+        # Return user-friendly title
+        return 'Note (\'%s\')' % self.title
+
 
 class NoteFolder:
     '''Represents a default or custom folder for notes (in reality a view on
@@ -949,6 +1246,11 @@ class NoteFolder:
         # Required comparison operations for set membership etc
         return not self.__eq__(other)
 
+    def __repr__(self):
+
+        # Return user-friendly title
+        return 'NoteFolder (\'%s\')' % self.title
+
 
 def extract_text(html_text, collapse_lines=False):
     '''Extract lines of text from HTML tags - this honours linebreaks'''
@@ -959,6 +1261,37 @@ def extract_text(html_text, collapse_lines=False):
         html_text = bs4.BeautifulSoup(html_text)
     text = '\n'.join(html_text.strings)
     return text if not collapse_lines else text.replace('\n', ' ')
+
+
+def deviantart_post_to_text(div_tag):
+    '''Turn deviantART post contained in the passed div tag into sensible text'''
+
+    # Turn links in the div to text links without the deviantART redirector
+    for link_tag in div_tag.select('a'):
+        if 'http://' in link_tag.attrs['href']:
+            link_tag.string = link_tag.attrs['href'].replace(
+                        'http://www.deviantart.com/users/outgoing?', '')
+        else:
+            link_tag.string = link_tag.attrs['href'].replace(
+                        'https://www.deviantart.com/users/outgoing?', '')
+        link_tag.unwrap()
+
+    # Replace out linebreaks with newlines to ensure they get honoured
+    for linebreak in div_tag.select('br'):
+        linebreak.replace_with('\n')
+
+    # TODO: In the future I should textify things like smilies etc
+    return div_tag.text.strip()
+
+
+def deviation_url_to_id(deviation_URL):
+    '''Extract a deviation ID from a deviation URL'''
+
+    match = re.match(r'^.+-([0-9]+)$', deviation_URL)
+    if match is None:
+        raise Exception('Unable to extract deviation ID from link \'%s\''
+                        % deviation_URL)
+    return int(match.groups()[0])
 
 
 def format_note_folder_id(folder_ID):
