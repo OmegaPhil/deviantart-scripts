@@ -510,7 +510,9 @@ class DeviantArtService(object):
                                    traceback.format_exc()))
         state.unread_notes_count = len(state.unread_notes)
 
-        state.deviations = [Deviation(hit['msgid'],
+        # Deviation IDs come through in a mangled form - the msgid has the
+        # the structure '<number>:<deviation ID>', no idea what the number is
+        state.deviations = [Deviation(hit['msgid'].split(':')[1],
                                      extract_text(hit['title'], True),
                                      hit['url'],
                                      extract_text(hit['username'], True),
