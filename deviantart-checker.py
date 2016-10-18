@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 '''
-Version 0.5 2015.03.21
-Copyright (c) 2014-2015, OmegaPhil - OmegaPhil@startmail.com
+Version 1 2016.10.18
+Copyright (c) 2014-2016, OmegaPhil - OmegaPhil@startmail.com
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by the

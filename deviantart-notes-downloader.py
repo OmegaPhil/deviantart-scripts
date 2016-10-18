@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-Version 0.1 2016.09.16
+Version 0.1 2016.10.18
 Copyright (c) 2016, OmegaPhil - OmegaPhil@startmail.com
 
 This program is free software: you can redistribute it and/or modify

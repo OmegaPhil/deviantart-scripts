@@ -1,12 +1,34 @@
+deviantart-checker.py v1 (18.10.16):
+deviantartART interaction code has now been moved out into devart.py.
+BREAKING CHANGE: Credentials are now stored in
+'~/.config/deviantart-scripts/credentials.conf' for clean sharing with other
+scripts in the (now) suite.
+BREAKING CHANGE: Configuration is now read from the ''~/.config/deviantart-scripts'
+directory - please move your configuration manually.
+Note content is now fetched when reporting on unread notes (courtesy of
+progression with the notes downloader script).
+
+deviantart-notes-downloader.py v0.1 (18.10.16):
+Script created to allow backing up sent and received notes.
+
+deviantart-unread-sent-notes-checker.py v0.1 (18.10.16):
+Script created to allow monitoring when sent notes become read.
+
+deviantart-deviations-downloader.py v0.1 (18.10.16):
+Script created to allow backing up gallery structure and deviation detail.
+
 v0.5 (21.03.15):
 Only allow one instance of the script to run at once.
 
 v0.4 (11.10.14):
-command_to_run_on_failure in the config now allows you to run a configurable command when an unhandled error happens. The script continues to run under
-these circumstances, but now you don't have to wrap around stderr somehow to get told when it happens.
+command_to_run_on_failure in the config now allows you to run a configurable
+command when an unhandled error happens. The script continues to run under these
+circumstances, but now you don't have to wrap around stderr somehow to get told
+when it happens.
 
 v0.3 (08.09.14):
-Allow for the whitelist to be selectively applied to certain events only - e.g. filter deviations but always be notified on replies.
+Allow for the whitelist to be selectively applied to certain events only - e.g.
+filter deviations but always be notified on replies.
 Improve text generation from initially HTML information associated with events. 
 
 v0.2 (30.08.14):
