@@ -172,7 +172,7 @@ The deviantAnywhere Firefox addon
 an example when developing the deviantART service code. 
 
 Thanks goes out to the following sites for documenting part of the DiFi API:
-http://botdom.com/documentation/DiFi
+http://botdom.com/documentation/DiFi  
 https://github.com/danopia/deviantart-difi/wiki
 
 
