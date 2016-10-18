@@ -171,7 +171,7 @@ The deviantAnywhere Firefox addon
 (https://addons.mozilla.org/en-US/firefox/addon/deviantanywhere/) was used as
 an example when developing the deviantART service code. 
 
-Thanks goes out to the following sites for documenting part of the DiFi API:
+Thanks goes out to the following sites for documenting part of the DiFi API:  
 http://botdom.com/documentation/DiFi  
 https://github.com/danopia/deviantart-difi/wiki
 
