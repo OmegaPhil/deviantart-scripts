@@ -1,3 +1,15 @@
+deviantart-deviations-downloader.py v0.2 and updated devart.py (16.02.17):
+deviantART has reworked their HTMl a little meaning that all scripts failed
+to log in, and then once that was fixed, deviation downloading failed completely
+as the gallery widget had been completely redone. This has now been sorted, with
+the exception that
+
+*deviation folders are no longer savable*,
+
+as the gallery widget no longer contains that information. It is available via a
+separate pass to analyse the folders specially, but I don't need this currently
+so it hasn't been implemented.
+
 deviantart-checker.py v1 (18.10.16):
 deviantartART interaction code has now been moved out into devart.py.
 BREAKING CHANGE: Credentials are now stored in
