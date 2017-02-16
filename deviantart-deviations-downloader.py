@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 '''
-Version 0.1 2016.10.18
-Copyright (c) 2016, OmegaPhil - OmegaPhil@startmail.com
+Version 0.2 2017.02.16
+Copyright (c) 2016-2017, OmegaPhil - OmegaPhil@startmail.com
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by the
@@ -386,6 +386,9 @@ for deviation in deviations:
 
         # New deviation detected - fetch the real detail, combine with folder
         # information only available via the gallery
+        # 16.02.17: dA has redone the HTML for the gallery, no folder
+        # information is available, and its still not available in the deviation
+        # pages themselves. This kills off recording folders for now
         full_deviation = dA.get_deviation(deviation.URL)
         full_deviation.folders = deviation.folders
 

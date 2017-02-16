@@ -1,5 +1,5 @@
 '''
-Copyright (c) 2014-2016, OmegaPhil - OmegaPhil@startmail.com
+Copyright (c) 2014-2017, OmegaPhil - OmegaPhil@startmail.com
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by the
@@ -222,7 +222,7 @@ class DeviantArtService(object):
         # Locating the main stream div (it turns out that classes like 'tt-a'
         # are also used outside of the deviations listing)
         div_deviations = (self.__last_content.
-                          select_one('div#gmi-EditableResourceStream'))
+                          select_one('div#gmi-ResourceStream'))
         if div_deviations is None:
             raise Exception('Unable to locate the main div containing the '
                             'deviations in the gallery page - HTML:\n\n%s\n'
@@ -230,46 +230,47 @@ class DeviantArtService(object):
 
         known_deviation_folders = {}
         deviations = []
-        for div_deviation in div_deviations.select('div.tt-a'):
+        for deviation_span in div_deviations.select('span.thumb'):
 
-            # Fetching the main link tag and validating
-            link_tag = div_deviation.select_one('a.t')
-            if link_tag is None:
-                raise Exception('Unable to fetch the main link tag from the '
-                                'following deviation div:\n\n%s\n\nProblem '
-                                'occurred while fetching all deviations from '
+            # Fetching the deviation link and validating
+            if 'href' not in deviation_span.attrs:
+                raise Exception('Unable to fetch the href from the following '
+                                'deviation span:\n\n%s\n\nProblem occurred '
+                                'while fetching all deviations from '
                                 'offset \'%s\''
-                                % div_deviation, deviation_offset)
+                                % deviation_span, deviation_offset)
 
-            # href will always be present in a link tag
-            deviation_URL = link_tag.attrs['href']
+            deviation_URL = deviation_span.attrs['href']
 
             # Fetching deviation ID
-            try:
-                deviation_ID = deviation_url_to_id(deviation_URL)
-            except Exception as e:
-                raise Exception('Unable to extract deviation ID from link '
-                                '\'%s\'. Problem occurred while fetching all '
-                                'deviations from offset \'%s\''
-                                % (deviation_URL, deviation_offset))
+            if 'data-deviationid' not in deviation_span.attrs:
+                raise Exception('Unable to fetch the deviation ID from the '
+                                'following deviation span:\n\n%s\n\nProblem '
+                                'occurred while fetching all deviations from '
+                                'offset \'%s\''
+                                % deviation_span, deviation_offset)
+
+            deviation_ID = deviation_span.attrs['data-deviationid']
 
             # Fetching deviation title and validating
-            if 'title' not in link_tag.attrs:
-                raise Exception('Deviation title is not present in the following'
-                                ' link tag:\n\n%s\n\nProblem occurred'
-                                ' while fetching all deviations from offset '
-                                '\'%s\'' % (link_tag, deviation_offset))
-            match = re.match(r'(.+) by %s.*' % username, link_tag.attrs['title'])
-            if match is None:
-                raise Exception('Unable to extract deviation title from text '
-                                '\'%s\'. Problem occurred while fetching all '
+            title_span = deviation_span.select_one('span.title')
+            if title_span is None:
+                raise Exception('Unable to locate the title span for deviation '
+                                'ID \'%s\' from the following deviation span:\n'
+                                '\n%s\n\nProblem occurred while fetching all '
                                 'deviations from offset \'%s\''
-                                % (link_tag.attrs['title'], deviation_offset))
-            deviation_title = match.groups()[0]
+                                % (deviation_ID, deviation_span,
+                                   deviation_offset))
+
+            deviation_title = title_span.text
 
             # Fetching deviation folders involved and validating (being
             # associated with no folders is perfectly acceptable)
-            folder_link_tags = div_deviation.select('span.gallections a')
+            # 16.02.17: dA appears to have redone the HTML here such that folders
+            # are no longer available via deviation records in the main gallery
+            # bit (they aren't available in the deviation's page either)... so
+            # this effectively kills off folder recording for now
+            folder_link_tags = deviation_span.select('span.gallections a')
             deviation_folders = []
             for folder_link_tag in folder_link_tags:
                 folder_URL = folder_link_tag.attrs['href']
@@ -991,7 +992,7 @@ class DeviantArtService(object):
         self.__last_content = bs4.BeautifulSoup(self.__r.content, 'lxml')
 
         # Locating login form
-        login_form = self.__last_content.find('form', id='form-login')
+        login_form = self.__last_content.find('form', id='login')
         if login_form is None:
             raise Exception('Unable to find login form on deviantART login'
                             ' page')
